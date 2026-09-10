@@ -12,6 +12,7 @@ const fr = {
     faq: "FAQ",
     news: "Nouveautés",
     workshop: "Mon atelier",
+    backOffice: "Back-office",
     signIn: "Connexion",
     signUp: "Créer mon atelier",
     openMenu: "Ouvrir le menu",
@@ -75,7 +76,7 @@ const en = {
   language: "English",
   meta: { tagline: "Your workshop, well organized.", description: "Filéo brings your customers, measurements, orders, deadlines and payments together in one place." },
   skip: "Skip to main content",
-  nav: { home: "Filéo - home", features: "Features", pricing: "Pricing", gettingStarted: "Getting started", faq: "FAQ", news: "News", workshop: "My workshop", signIn: "Sign in", signUp: "Create my workshop", openMenu: "Open menu", closeMenu: "Close menu", chooseLanguage: "Choose language" },
+  nav: { home: "Filéo - home", features: "Features", pricing: "Pricing", gettingStarted: "Getting started", faq: "FAQ", news: "News", workshop: "My workshop", backOffice: "Back office", signIn: "Sign in", signUp: "Create my workshop", openMenu: "Open menu", closeMenu: "Close menu", chooseLanguage: "Choose language" },
   home: {
     eyebrow: "Management designed for tailoring workshops",
     title: "Your workshop, well organized.",
@@ -104,7 +105,7 @@ const lg = {
   language: "Lingála",
   meta: { tagline: "Atelier na yo, ebongisami malamu.", description: "Filéo esangisaka bakiliya, bamezire, bakɔmande, badati mpe mbongo na esika moko." },
   skip: "Kende na makambo ya ntina",
-  nav: { home: "Filéo - ebandeli", features: "Makoki", pricing: "Ntalo", gettingStarted: "Kobanda", faq: "Mituna", news: "Sango", workshop: "Atelier na ngai", signIn: "Kokota", signUp: "Fungola atelier", openMenu: "Fungola menu", closeMenu: "Kanga menu", chooseLanguage: "Pona monɔkɔ" },
+  nav: { home: "Filéo - ebandeli", features: "Makoki", pricing: "Ntalo", gettingStarted: "Kobanda", faq: "Mituna", news: "Sango", workshop: "Atelier na ngai", backOffice: "Back-office", signIn: "Kokota", signUp: "Fungola atelier", openMenu: "Fungola menu", closeMenu: "Kanga menu", chooseLanguage: "Pona monɔkɔ" },
   home: {
     eyebrow: "Bokambami oyo esalemi mpo na ba atelier ya couture",
     title: "Atelier na yo, ebongisami malamu.",

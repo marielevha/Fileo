@@ -3,10 +3,11 @@
 import { redirect } from "next/navigation";
 import { execute, newId, nowIso, queryOne, transaction } from "@/lib/db";
 import { hashPassword, validatePasswordStrength, verifyPassword } from "@/lib/auth/password";
-import { createSession, destroySession, getSession } from "@/lib/auth/session";
+import { createSession, destroySession, getSession, parsePlatformRoles } from "@/lib/auth/session";
 import { recordAudit } from "@/lib/audit";
 import { COUNTRIES, isCountryCode, parsePhone, type CountryCode } from "@/lib/phone";
 import { isCurrencyCode } from "@/lib/money";
+import { canInAdmin } from "@/lib/permissions";
 
 /** Shape returned to every auth form via useActionState. */
 export type FormState = { error?: string; ok?: boolean };
@@ -25,8 +26,8 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   const phone = parsePhone(rawPhone, country);
   if (!phone.ok) return { error: phone.error };
 
-  const user = queryOne<{ id: string; password_hash: string; status: string }>(
-    `SELECT id, password_hash, status FROM users WHERE phone_e164 = ?`,
+  const user = queryOne<{ id: string; password_hash: string; status: string; platform_roles: string }>(
+    `SELECT id, password_hash, status, platform_roles FROM users WHERE phone_e164 = ?`,
     [phone.e164],
   );
 
@@ -41,7 +42,15 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   await createSession(user.id);
   recordAudit({ actorUserId: user.id, action: "auth.login", entityKind: "user", entityId: user.id });
 
-  redirect("/atelier");
+  const platformRoles = parsePlatformRoles(user.platform_roles);
+  const destination = canInAdmin(
+    { userId: user.id, platformRoles },
+    "admin.dashboard",
+  )
+    ? "/admin"
+    : "/atelier";
+
+  redirect(destination);
 }
 
 /* ---------------------------------------------------------------

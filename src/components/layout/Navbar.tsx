@@ -9,7 +9,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
 import { localePath, type Locale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 
-export default function Navbar({ signedIn = false, locale }: { signedIn?: boolean; locale: Locale }) {
+export default function Navbar({ signedIn = false, adminAccess = false, locale }: { signedIn?: boolean; adminAccess?: boolean; locale: Locale }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const copy = getMessages(locale);
@@ -63,8 +63,8 @@ export default function Navbar({ signedIn = false, locale }: { signedIn?: boolea
 
         <div className="flex items-center gap-2">
           {signedIn ? (
-            <Link href={localePath(locale, "/atelier")} className="btn btn-primary btn-sm hidden shadow-md sm:inline-flex">
-              {copy.nav.workshop}
+            <Link href={localePath(locale, adminAccess ? "/admin" : "/atelier")} className="btn btn-primary btn-sm hidden shadow-md sm:inline-flex">
+              {adminAccess ? copy.nav.backOffice : copy.nav.workshop}
             </Link>
           ) : (
             <>
@@ -115,8 +115,8 @@ export default function Navbar({ signedIn = false, locale }: { signedIn?: boolea
           ))}
           <li className="flex flex-col gap-2 pt-2">
             {signedIn ? (
-              <Link href={localePath(locale, "/atelier")} onClick={() => setOpen(false)} className="btn btn-primary w-full">
-                {copy.nav.workshop}
+              <Link href={localePath(locale, adminAccess ? "/admin" : "/atelier")} onClick={() => setOpen(false)} className="btn btn-primary w-full">
+                {adminAccess ? copy.nav.backOffice : copy.nav.workshop}
               </Link>
             ) : (
               <>

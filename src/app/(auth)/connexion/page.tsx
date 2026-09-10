@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import SignInForm from "./SignInForm";
 import { getSession } from "@/lib/auth/session";
+import { canInAdmin } from "@/lib/permissions";
 
 export const metadata: Metadata = {
   title: "Connexion",
@@ -11,7 +12,10 @@ export const metadata: Metadata = {
 };
 
 export default async function SignInPage() {
-  if (await getSession()) redirect("/atelier");
+  const session = await getSession();
+  if (session) {
+    redirect(canInAdmin(session.actor, "admin.dashboard") ? "/admin" : "/atelier");
+  }
 
   return (
     <div className="bg-base-100 border-base-300 rounded-2xl border p-8 shadow-xl">

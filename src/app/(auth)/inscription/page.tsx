@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import SignUpForm from "./SignUpForm";
 import { getSession } from "@/lib/auth/session";
+import { canInAdmin } from "@/lib/permissions";
 
 export const metadata: Metadata = {
   title: "Créer mon atelier",
@@ -15,7 +16,10 @@ export default async function SignUpPage({
 }: {
   searchParams: Promise<{ offre?: string }>;
 }) {
-  if (await getSession()) redirect("/atelier");
+  const session = await getSession();
+  if (session) {
+    redirect(canInAdmin(session.actor, "admin.dashboard") ? "/admin" : "/atelier");
+  }
   const { offre } = await searchParams;
 
   return (

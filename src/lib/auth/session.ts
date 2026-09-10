@@ -207,7 +207,7 @@ export async function getSession(): Promise<SessionContext | null> {
   };
 }
 
-function parsePlatformRoles(raw: string): PlatformRole[] {
+export function parsePlatformRoles(raw: string): PlatformRole[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];

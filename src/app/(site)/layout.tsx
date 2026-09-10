@@ -3,6 +3,7 @@ import Footer from "@/components/layout/Footer";
 import CookieBanner from "@/components/ui/CookieBanner";
 import { getSession } from "@/lib/auth/session";
 import { getLocale } from "@/lib/i18n/request";
+import { canInAdmin } from "@/lib/permissions";
 
 /** Public site shell (§6). Signed-in visitors get a shortcut to their workshop. */
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
@@ -11,7 +12,11 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
 
   return (
     <>
-      <Navbar signedIn={Boolean(session)} locale={locale} />
+      <Navbar
+        signedIn={Boolean(session)}
+        adminAccess={Boolean(session && canInAdmin(session.actor, "admin.dashboard"))}
+        locale={locale}
+      />
       <main id="main">{children}</main>
       <Footer />
       <CookieBanner locale={locale} />

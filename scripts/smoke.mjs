@@ -100,7 +100,16 @@ report(
   true,
 );
 
-console.log("\nSans session — redirection attendue\n");
+console.log("\nRedirection après authentification\n");
+const ownerLogin = await get("/fr/connexion", owner);
+report("responsable connecté -> atelier", ownerLogin.location, "/atelier");
+const staffLogin = await get("/fr/connexion", staff);
+report("admin connecté -> back-office", staffLogin.location, "/admin");
+const staffHome = await get("/fr", staff);
+report("bouton admin pointe vers /fr/admin", staffHome.body.includes('href="/fr/admin"'), true);
+
+console.log("\nSans session - redirection attendue\n");
+
 for (const path of ["/fr/atelier", "/fr/atelier/clients", "/fr/admin"]) {
   const res = await get(path);
   report(`${path} → ${res.location ?? "?"}`, res.status, 307);
