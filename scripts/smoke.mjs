@@ -130,6 +130,7 @@ for (const path of [
   `/fr/atelier/clients/${sampleClient.id}/modifier`,
   "/fr/atelier/commandes",
   `/fr/atelier/commandes/${sampleOrder.id}`,
+  `/fr/atelier/commandes/${sampleOrder.id}/encaissement`,
   "/fr/atelier/planning",
   "/fr/atelier/planning?vue=jour",
   "/fr/atelier/planning?vue=semaine",
@@ -156,9 +157,11 @@ report("montant 7 500 transmis", hasAmount, true);
 console.log("\nCollaborateur sans droit financier — REC-12\n");
 const collabOrders = await get("/fr/atelier/commandes", collaborator);
 const collabOrderDetail = await get(`/fr/atelier/commandes/${sampleOrder.id}`, collaborator);
+const collabPayment = await get(`/fr/atelier/commandes/${sampleOrder.id}/encaissement`, collaborator);
 const collabPlanning = await get("/fr/atelier/planning", collaborator);
 report("/atelier/commandes accessible", collabOrders.status, 200);
 report("détail commande accessible", collabOrderDetail.status, 200);
+report("encaissement refusé sans droit financier", collabPayment.status, 404);
 report("planning collaborateur accessible", collabPlanning.status, 200);
 report(
   "aucune colonne « Reste à payer »",

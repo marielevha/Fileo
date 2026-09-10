@@ -81,6 +81,9 @@ export function recordPayment(input: RecordPaymentInput): RecordPaymentResult {
     );
 
     if (!order) throw new FinancialError("Commande introuvable dans cet atelier.");
+    if (order.cancelled_at) {
+      throw new FinancialError("Aucun nouvel encaissement ne peut être ajouté à une commande annulée.");
+    }
 
     if (order.currency !== input.amount.currency) {
       throw new FinancialError(
@@ -89,12 +92,36 @@ export function recordPayment(input: RecordPaymentInput): RecordPaymentResult {
     }
 
     // Replay of an already-accepted operation: return the original.
-    const existing = queryOne<{ id: string }>(
-      `SELECT id FROM financial_movements WHERE workshop_id = ? AND idempotency_key = ?`,
+    const existing = queryOne<{
+      id: string;
+      order_id: string;
+      kind: string;
+      amount: number;
+      currency: string;
+      method: string;
+      reference: string | null;
+      effective_date: string;
+    }>(
+      `SELECT id, order_id, kind, amount, currency, method, reference, effective_date
+         FROM financial_movements
+        WHERE workshop_id = ? AND idempotency_key = ?`,
       [input.workshopId, input.idempotencyKey],
     );
 
-    if (existing) return { movementId: existing.id, deduplicated: true };
+    if (existing) {
+      const sameOperation =
+        existing.order_id === input.orderId &&
+        existing.kind === "payment" &&
+        existing.amount === input.amount.amount &&
+        existing.currency === input.amount.currency &&
+        existing.method === input.method &&
+        existing.reference === (input.reference ?? null) &&
+        existing.effective_date === input.effectiveDate;
+      if (!sameOperation) {
+        throw new FinancialError("Cette tentative d'encaissement a déjà été utilisée avec d'autres données.");
+      }
+      return { movementId: existing.id, deduplicated: true };
+    }
 
     const id = newId();
 

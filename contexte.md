@@ -85,6 +85,7 @@ npm.cmd run check:money     # formules §8.7 + contraintes de schéma
 npm.cmd run check:clients   # CRUD, recherche, tris, pagination, deleted_at
 npm.cmd run check:orders    # pagination de la liste des commandes
 npm.cmd run check:planning  # replanification, affectation, remise, audit
+npm.cmd run check:payments  # écriture, audit, idempotence et affichage encaissement
 npm.cmd run check:smoke     # routes, locales et permissions par rôle
 npm.cmd run lint            # ESLint
 npm.cmd exec tsc -- --noEmit
@@ -287,6 +288,11 @@ atteignables par le pied de page et par des liens « voir tout ».
   depuis la référence ou le bouton « Voir », pagination serveur 10/20/50 et
   liens localisés. La fiche détail conserve le filtrage financier REC-12 et les
   liens retour/client/encaissement respectent la locale.
+- **Encaissements (§8.7)** : formulaire depuis la fiche commande avec montant,
+  date effective, moyen et référence ; raccourci vers le solde restant ; écriture
+  confirmée dans le registre financier, audit, clé d'idempotence et confirmation
+  sur la fiche. Les commandes annulées et les membres sans droit financier sont
+  refusés.
 - **Planning (§8.6)** : vues liste, jour et semaine ; navigation temporelle ;
   recherche directe ; filtres par collaborateur et état ; raccourcis aujourd'hui,
   sept jours, retards et prêts. Les événements distinguent échéance d'article,
@@ -309,8 +315,8 @@ atteignables par le pied de page et par des liens « voir tout ».
 1. **Vérification du téléphone (§7.1 AUTH-01)** — aucun fournisseur SMS retenu.
    Les comptes sont actifs dès la création. **Bloquant avant toute ouverture
    publique des inscriptions.**
-2. **Formulaires de création** : commande et encaissement. Le formulaire client
-   est terminé et testé.
+2. **Formulaires de création** : commande. Les formulaires client et encaissement
+   sont terminés et testés.
 3. **Pages atelier manquantes** (la navigation y renvoie déjà, elles renvoient
    404) : paiements, dépenses, équipe, abonnement, paramètres. Le planning est
    désormais implémenté.
@@ -339,14 +345,19 @@ pages 1 et 2 et restaure la base. `npm.cmd run check:planning` modifie réelleme
 une échéance, une affectation et un état, vérifie la remise, l'historique et
 l'audit, puis restaure exactement l'article de démonstration.
 
+`npm.cmd run check:payments` soumet le formulaire HTTP authentifié, vérifie le
+mouvement confirmé, l'audit, la redirection, l'historique et rejoue exactement
+la même opération pour garantir qu'aucun doublon n'est créé (REC-04).
+
 `npm.cmd run check:smoke` couvre **REC-12** pour de bon : le collaborateur sans
 droit financier reçoit la page des commandes sans la colonne « Reste à payer »
-ni le montant dans le HTML. Il vérifie aussi les routes détail commande et les
-vues liste/jour/semaine du planning pour le responsable et le collaborateur.
+ni le montant dans le HTML. Il vérifie aussi que la page d'encaissement lui
+renvoie 404, ainsi que les routes détail commande et les vues liste/jour/semaine
+du planning pour le responsable et le collaborateur.
 
 Dernière validation complète : TypeScript, ESLint, `check:money`,
-`check:clients`, `check:orders`, `check:planning`, `check:smoke` et build Next.js
-de production réussis le 10 septembre 2026.
+`check:clients`, `check:orders`, `check:planning`, `check:payments`, `check:smoke`
+et build Next.js de production réussis le 10 septembre 2026.
 
 Non couverts, car ils exigent des tests d'intégration ou le client mobile :
 REC-08, REC-09, REC-11, REC-14 à REC-16, REC-19 à REC-24.

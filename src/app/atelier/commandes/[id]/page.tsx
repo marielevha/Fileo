@@ -17,12 +17,15 @@ export const metadata: Metadata = {
 
 export default async function OrderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ encaissement?: string }>;
 }) {
   const { workshop } = await requireWorkshop("orders.read");
   const locale = await getLocale();
   const { id } = await params;
+  const query = await searchParams;
 
   const summary = getOrder(workshop.id, id, workshop.canViewMoney);
   if (!summary) notFound();
@@ -51,6 +54,13 @@ export default async function OrderDetailPage({
           </div>
         }
       />
+
+      {query.encaissement === "ok" ? (
+        <p className="alert alert-success mb-6 py-3 text-sm">
+          <Icon name="check" className="h-5 w-5" />
+          Encaissement enregistré avec succès.
+        </p>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">

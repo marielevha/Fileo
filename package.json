@@ -13,6 +13,7 @@
     "check:clients": "node scripts/check-clients.mjs",
     "check:orders": "node scripts/check-orders.mjs",
     "check:planning": "node scripts/check-planning.mjs",
+    "check:payments": "node scripts/check-payments.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\" && node scripts/seed.mjs"
   },
