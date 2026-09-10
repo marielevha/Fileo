@@ -10,8 +10,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function SignUpPage() {
+export default async function SignUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ offre?: string }>;
+}) {
   if (await getSession()) redirect("/atelier");
+  const { offre } = await searchParams;
 
   return (
     <div className="bg-base-100 border-base-300 rounded-2xl border p-8 shadow-xl">
@@ -20,7 +25,7 @@ export default async function SignUpPage() {
         Essai de 14 jours. Aucun moyen de paiement demandé pour démarrer.
       </p>
 
-      <SignUpForm />
+      <SignUpForm planCode={offre} />
 
       <p className="text-base-content/60 mt-6 text-center text-sm">
         Vous avez déjà un compte ?{" "}

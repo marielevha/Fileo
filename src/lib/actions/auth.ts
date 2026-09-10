@@ -56,6 +56,7 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
   const workshopName = String(formData.get("workshopName") ?? "").trim();
   const city = String(formData.get("city") ?? "").trim();
   const currency = String(formData.get("currency") ?? "");
+  const planCode = String(formData.get("planCode") ?? "").trim();
   const accepted = formData.get("terms") === "on";
 
   if (fullName.length < 2) return { error: "Merci d'indiquer votre nom." };
@@ -75,6 +76,15 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
     phone.e164,
   ]);
   if (existing) return { error: "Un compte existe déjà avec ce numéro." };
+
+  const selectedPlan = queryOne<{ id: string }>(
+    `SELECT id FROM plans
+      WHERE country_code = ? AND archived_at IS NULL
+        AND (? = '' OR code = ?)
+      ORDER BY price_amount ASC, version DESC LIMIT 1`,
+    [country, planCode, planCode],
+  );
+  if (!selectedPlan) return { error: "L'offre sélectionnée n'est pas disponible pour ce pays." };
 
   const passwordHash = await hashPassword(password);
   const countryInfo = COUNTRIES[country as CountryCode];
@@ -116,23 +126,15 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
       [newId(), wid, uid, nowIso(), nowIso()],
     );
 
-    // Trial subscription against the current offer for this country (§11.2).
-    const plan = queryOne<{ id: string }>(
-      `SELECT id FROM plans
-        WHERE country_code = ? AND archived_at IS NULL
-        ORDER BY version DESC LIMIT 1`,
-      [country],
+    // The pricing-page choice is preserved through signup. Direct signups
+    // receive the least expensive active offer for their country (§6.2).
+    const trialEnd = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+    execute(
+      `INSERT INTO subscriptions
+         (id, workshop_id, plan_id, status, trial_ends_at, current_period_end, created_at, updated_at)
+       VALUES (?, ?, ?, 'trial', ?, ?, ?, ?)`,
+      [newId(), wid, selectedPlan.id, trialEnd, trialEnd, nowIso(), nowIso()],
     );
-
-    if (plan) {
-      const trialEnd = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
-      execute(
-        `INSERT INTO subscriptions
-           (id, workshop_id, plan_id, status, trial_ends_at, current_period_end, created_at, updated_at)
-         VALUES (?, ?, ?, 'trial', ?, ?, ?, ?)`,
-        [newId(), wid, plan.id, trialEnd, trialEnd, nowIso(), nowIso()],
-      );
-    }
 
     recordAudit({
       workshopId: wid,

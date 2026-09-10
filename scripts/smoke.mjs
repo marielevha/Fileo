@@ -66,6 +66,40 @@ for (const path of ["/fr", "/en", "/lg", "/fr/connexion", "/fr/inscription", "/f
   report(path, (await get(path)).status, 200);
 }
 
+console.log("\nOffres localisées\n");
+for (const locale of ["fr", "en", "lg"]) {
+  const pricing = await get(`/${locale}`);
+  report(`/${locale} affiche Filéo Pro`, pricing.body.includes("Filéo Pro"), true);
+  report(`/${locale} affiche 5 000 FCFA`, /5[\s  ]000\s*FCFA/.test(pricing.body), true);
+  report(
+    `/${locale} transmet l'offre Pro`,
+    pricing.body.includes(`/${locale}/inscription?offre=pro`),
+    true,
+  );
+
+  if (locale === "en") {
+    report(
+      "/en ne mélange pas le lingala",
+      !/Makoki|Ntalo|Kobanda|Mituna|Sango|Kokota|Fungola atelier/.test(pricing.body),
+      true,
+    );
+  }
+  if (locale === "lg") {
+    report(
+      "/lg ne mélange pas l'anglais",
+      !/Explore features|Remaining to collect|Create my workshop|All rights reserved/.test(pricing.body),
+      true,
+    );
+  }
+}
+
+const proSignup = await get("/fr/inscription?offre=pro");
+report(
+  "inscription conserve le code offre",
+  /name="planCode" value="pro"/.test(proSignup.body),
+  true,
+);
+
 console.log("\nSans session — redirection attendue\n");
 for (const path of ["/fr/atelier", "/fr/atelier/clients", "/fr/admin"]) {
   const res = await get(path);

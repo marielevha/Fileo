@@ -4,8 +4,6 @@ import Reveal from "@/components/ui/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { formatMoney, money, type CurrencyCode } from "@/lib/money";
 import { listActivePlans, parseLimits } from "@/lib/repos/contents";
-import { COUNTRIES, type CountryCode } from "@/lib/phone";
-import { includedFeatures } from "@/lib/site";
 import { getLocale } from "@/lib/i18n/request";
 import { getMessages } from "@/lib/i18n/messages";
 import { localePath } from "@/lib/i18n/config";
@@ -35,17 +33,19 @@ export default async function Pricing() {
           <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
             {plans.map((plan, index) => {
               const limits = parseLimits(plan.limits_json);
-              const country = COUNTRIES[plan.country_code as CountryCode];
               const price = money(plan.price_amount, plan.currency as CurrencyCode);
+              const planLabel = copy.plans[plan.code as keyof typeof copy.plans] ?? plan.label;
 
               return (
                 <Reveal key={plan.id} delay={index * 120}>
-                  <article className="accent-1 card-lift bg-base-200 border-base-300 h-full rounded-2xl border p-8">
+                  <article
+                    className={`${index % 2 === 0 ? "accent-1" : "accent-2"} card-lift bg-base-200 border-base-300 h-full rounded-2xl border p-8`}
+                  >
                     <p className="text-base-content/55 text-sm font-medium">
-                      {country?.label ?? plan.country_code}
+                      {plan.country_code === "CG" ? copy.country : plan.country_code}
                     </p>
 
-                    <h3 className="font-display mt-1 text-xl font-bold">{plan.label}</h3>
+                    <h3 className="font-display mt-1 text-xl font-bold">{planLabel}</h3>
 
                     <p className="mt-5 flex items-baseline gap-1.5">
                       <span className="font-display text-primary text-4xl font-extrabold">
@@ -61,7 +61,7 @@ export default async function Pricing() {
                     </p>
 
                     <ul className="mt-6 space-y-2.5">
-                      {includedFeatures.map((item) => (
+                      {copy.features.map((item) => (
                         <li key={item} className="flex items-start gap-2.5 text-sm">
                           <span className="bg-success/15 text-success mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full">
                             <Icon name="check" className="h-3 w-3" strokeWidth={3} />
@@ -85,7 +85,10 @@ export default async function Pricing() {
                       </div>
                     </dl>
 
-                    <Link href={localePath(locale, "/inscription")} className="btn btn-primary mt-7 w-full">
+                    <Link
+                      href={`${localePath(locale, "/inscription")}?offre=${encodeURIComponent(plan.code)}`}
+                      className="btn btn-primary mt-7 w-full"
+                    >
                       {copy.trial}
                     </Link>
                   </article>

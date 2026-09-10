@@ -14,7 +14,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
       <Navbar signedIn={Boolean(session)} locale={locale} />
       <main id="main">{children}</main>
       <Footer />
-      <CookieBanner />
+      <CookieBanner locale={locale} />
     </>
   );
 }

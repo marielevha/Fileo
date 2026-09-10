@@ -27,7 +27,7 @@ export default async function FaqPreview({ limit = 5 }: { limit?: number }) {
             <Reveal key={entry.id} delay={index * 70}>
               <details className="group bg-base-100 border-base-300 rounded-2xl border p-5 [&_summary::-webkit-details-marker]:hidden">
                 <summary className="flex cursor-pointer items-center justify-between gap-4 font-semibold">
-                  {entry.title}
+                  {copy.entries[index]?.[0] ?? entry.title}
                   <span
                     aria-hidden="true"
                     className="text-primary shrink-0 text-xl transition-transform group-open:rotate-45"
@@ -36,7 +36,7 @@ export default async function FaqPreview({ limit = 5 }: { limit?: number }) {
                   </span>
                 </summary>
                 <p className="text-base-content/70 mt-3 text-sm leading-relaxed text-pretty">
-                  {entry.body}
+                  {copy.entries[index]?.[1] ?? entry.body}
                 </p>
               </details>
             </Reveal>

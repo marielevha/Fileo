@@ -132,16 +132,31 @@ insert("memberships", {
 
 // --- Offres et abonnement ----------------------------------------
 const planCgId = randomUUID();
+const planCgProId = randomUUID();
 
 insert("plans", {
   id: planCgId,
-  code: "mensuel",
-  label: "Filéo Mensuel",
+  code: "essentiel",
+  label: "Filéo Essentiel",
   country_code: "CG",
   currency: "XAF",
   price_amount: 2500, // XAF : 0 décimale, donc 2500 et non 250000
   period_months: 1,
   limits_json: JSON.stringify({ members: 5, storageMb: 2000, orders: null }),
+  version: 1,
+  effective_from: day(-30),
+  created_at: now(),
+});
+
+insert("plans", {
+  id: planCgProId,
+  code: "pro",
+  label: "Filéo Pro",
+  country_code: "CG",
+  currency: "XAF",
+  price_amount: 5000,
+  period_months: 1,
+  limits_json: JSON.stringify({ members: 10, storageMb: 5000, orders: null }),
   version: 1,
   effective_from: day(-30),
   created_at: now(),

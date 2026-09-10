@@ -59,7 +59,7 @@ export default async function Hero() {
           </div>
 
           <p className="text-base-content/50 mt-4 text-sm">
-            Essai de 14 jours. Aucun moyen de paiement demandé pour démarrer.
+            {copy.trial}
           </p>
         </div>
 
@@ -71,15 +71,15 @@ export default async function Hero() {
                 <span className="bg-error/60 h-3 w-3 rounded-full" />
                 <span className="bg-warning/60 h-3 w-3 rounded-full" />
                 <span className="bg-success/60 h-3 w-3 rounded-full" />
-                <span className="text-base-content/40 ml-3 text-xs">Mon atelier</span>
+                <span className="text-base-content/40 ml-3 text-xs">{copy.dashboard.workshop}</span>
               </div>
 
               <div className="space-y-4 p-5">
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: "À livrer", value: "3", accent: "accent-1" },
-                    { label: "En retard", value: "1", accent: "accent-3" },
-                    { label: "Prêtes", value: "2", accent: "accent-2" },
+                    { label: copy.dashboard.due, value: "3", accent: "accent-1" },
+                    { label: copy.dashboard.overdue, value: "1", accent: "accent-3" },
+                    { label: copy.dashboard.ready, value: "2", accent: "accent-2" },
                   ].map((tile) => (
                     <div
                       key={tile.label}
@@ -95,9 +95,9 @@ export default async function Hero() {
 
                 <div className="border-base-300 space-y-3 rounded-xl border p-4">
                   {[
-                    { ref: "CMD-0001", who: "Chancelvie L.", state: "En cours", tone: "accent-2" },
-                    { ref: "CMD-0002", who: "Grâce B.", state: "En retard", tone: "accent-3" },
-                    { ref: "CMD-0003", who: "Rodrigue S.", state: "Prêt", tone: "accent-1" },
+                    { ref: "CMD-0001", who: "Chancelvie L.", state: copy.dashboard.inProgress, tone: "accent-2" },
+                    { ref: "CMD-0002", who: "Grâce B.", state: copy.dashboard.overdue, tone: "accent-3" },
+                    { ref: "CMD-0003", who: "Rodrigue S.", state: copy.dashboard.readyOne, tone: "accent-1" },
                   ].map((row) => (
                     <div key={row.ref} className={`${row.tone} flex items-center gap-3`}>
                       <span className="bg-base-200 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold">
@@ -115,7 +115,7 @@ export default async function Hero() {
                 </div>
 
                 <div className="border-base-300 flex items-center justify-between rounded-xl border p-4">
-                  <span className="text-base-content/55 text-sm">Reste à encaisser</span>
+                  <span className="text-base-content/55 text-sm">{copy.dashboard.remaining}</span>
                   <span className="font-display text-primary text-lg font-bold">37 500 FCFA</span>
                 </div>
               </div>
@@ -123,7 +123,7 @@ export default async function Hero() {
           </div>
 
           <p className="text-base-content/40 mt-3 text-center text-xs">
-            Aperçu de l&apos;interface — données de démonstration.
+            {copy.dashboard.preview}
           </p>
         </div>
       </div>

@@ -9,6 +9,8 @@ import { localePath } from "@/lib/i18n/config";
 export default async function Footer() {
   const locale = await getLocale();
   const copy = getMessages(locale);
+  const productLabels = [copy.nav.features, copy.nav.pricing, copy.footer.download, copy.footer.news];
+  const supportLabels = [copy.footer.gettingStarted, copy.footer.faq, copy.footer.contactLink];
   // base-300 rather than `neutral`: in synthwave, neutral is a vivid indigo.
   return (
     <footer className="bg-base-300 text-base-content">
@@ -30,13 +32,13 @@ export default async function Footer() {
               {copy.footer.product}
             </h2>
             <ul className="mt-5 space-y-3 text-sm">
-              {footerProduct.map((link) => (
+              {footerProduct.map((link, index) => (
                 <li key={link.href}>
                   <Link
                     href={localePath(locale, link.href)}
                     className="text-base-content/65 hover:text-primary transition-colors"
                   >
-                    {link.label}
+                    {productLabels[index]}
                   </Link>
                 </li>
               ))}
@@ -48,13 +50,13 @@ export default async function Footer() {
               {copy.footer.support}
             </h2>
             <ul className="mt-5 space-y-3 text-sm">
-              {footerSupport.map((link) => (
+              {footerSupport.map((link, index) => (
                 <li key={link.href}>
                   <Link
                     href={localePath(locale, link.href)}
                     className="text-base-content/65 hover:text-primary transition-colors"
                   >
-                    {link.label}
+                    {supportLabels[index]}
                   </Link>
                 </li>
               ))}
@@ -91,13 +93,13 @@ export default async function Footer() {
             © {site.foundedYear} {site.name}. {copy.footer.rights}
           </p>
           <ul className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2">
-            {legalLinks.map((link) => (
+            {legalLinks.map((link, index) => (
               <li key={link.href}>
                 <Link
                   href={localePath(locale, link.href)}
                   className="text-base-content/55 hover:text-primary transition-colors"
                 >
-                  {link.label}
+                  {copy.footer.legal[index]}
                 </Link>
               </li>
             ))}

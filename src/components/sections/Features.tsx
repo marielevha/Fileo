@@ -34,7 +34,7 @@ export default async function Features() {
                   </p>
 
                   <ul className="mt-auto flex flex-wrap gap-2 pt-6">
-                    {feature.tags.map((tag) => (
+                    {copy.featureTags[index].map((tag) => (
                       <li
                         key={tag}
                         className="rounded-full border border-[color-mix(in_oklab,var(--accent)_35%,transparent)] px-3 py-1 text-xs font-medium text-[color:var(--accent)]"
