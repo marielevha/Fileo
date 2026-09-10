@@ -4,8 +4,6 @@ import { execute, newId, nowIso, query, queryOne } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { normaliseDigits } from "@/lib/phone";
 
-/** Client records — cahier des charges §8.2. */
-
 export type ClientRow = {
   id: string;
   workshop_id: string;
@@ -17,7 +15,9 @@ export type ClientRow = {
   guardian_phone: string | null;
   notes: string | null;
   archived_at: string | null;
+  deleted_at: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type ClientListItem = ClientRow & {
@@ -25,45 +25,82 @@ export type ClientListItem = ClientRow & {
   last_order_at: string | null;
 };
 
+export type ClientSort = "name" | "phone" | "orders" | "lastOrder" | "createdAt";
+export type SortDirection = "asc" | "desc";
+export type ClientPage = {
+  items: ClientListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+};
+
+const SORT_SQL: Record<ClientSort, string> = {
+  name: "c.display_name COLLATE NOCASE",
+  phone: "c.phone_search",
+  orders: "order_count",
+  lastOrder: "last_order_at",
+  createdAt: "c.created_at",
+};
+
 export function listClients(
   workshopId: string,
-  options: { search?: string; includeArchived?: boolean; limit?: number } = {},
-): ClientListItem[] {
+  options: {
+    search?: string;
+    includeArchived?: boolean;
+    page?: number;
+    pageSize?: number;
+    sort?: ClientSort;
+    direction?: SortDirection;
+  } = {},
+): ClientPage {
   const term = options.search?.trim() ?? "";
   const digits = normaliseDigits(term);
-
-  // Name match, or phone match on the normalised digits form (§8.2).
-  return query<ClientListItem>(
-    `SELECT c.*,
-            (SELECT COUNT(*) FROM orders o WHERE o.client_id = c.id) AS order_count,
-            (SELECT MAX(o.created_at) FROM orders o WHERE o.client_id = c.id) AS last_order_at
-       FROM clients c
-      WHERE c.workshop_id = ?
+  const pageSize = Math.min(100, Math.max(10, options.pageSize ?? 20));
+  const requestedPage = Math.max(1, options.page ?? 1);
+  const sort = options.sort && options.sort in SORT_SQL ? options.sort : "name";
+  const direction = options.direction === "desc" ? "DESC" : "ASC";
+  const filters = `c.workshop_id = ?
+        AND c.deleted_at IS NULL
         AND (? = 1 OR c.archived_at IS NULL)
         AND (
           ? = ''
           OR LOWER(c.display_name) LIKE '%' || LOWER(?) || '%'
           OR (? <> '' AND c.phone_search LIKE '%' || ? || '%')
-        )
-      ORDER BY c.display_name COLLATE NOCASE
-      LIMIT ?`,
-    [
-      workshopId,
-      options.includeArchived ? 1 : 0,
-      term,
-      term,
-      digits,
-      digits,
-      options.limit ?? 200,
-    ],
+        )`;
+  const filterParams = [
+    workshopId,
+    options.includeArchived ? 1 : 0,
+    term,
+    term,
+    digits,
+    digits,
+  ];
+
+  const total = queryOne<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM clients c WHERE ${filters}`,
+    filterParams,
+  )?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, pageCount);
+  const items = query<ClientListItem>(
+    `SELECT c.*,
+            (SELECT COUNT(*) FROM orders o WHERE o.client_id = c.id) AS order_count,
+            (SELECT MAX(o.created_at) FROM orders o WHERE o.client_id = c.id) AS last_order_at
+       FROM clients c
+      WHERE ${filters}
+      ORDER BY ${SORT_SQL[sort]} ${direction}, c.id ASC
+      LIMIT ? OFFSET ?`,
+    [...filterParams, pageSize, (page - 1) * pageSize],
   );
+  return { items, total, page, pageSize, pageCount };
 }
 
 export function getClient(workshopId: string, clientId: string): ClientRow | null {
-  return queryOne<ClientRow>(`SELECT * FROM clients WHERE workshop_id = ? AND id = ?`, [
-    workshopId,
-    clientId,
-  ]);
+  return queryOne<ClientRow>(
+    `SELECT * FROM clients WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
+    [workshopId, clientId],
+  );
 }
 
 export type CreateClientInput = {
@@ -79,29 +116,19 @@ export type CreateClientInput = {
 
 export function createClient(input: CreateClientInput): string {
   const id = newId();
-  const search = input.phoneE164 ? normaliseDigits(input.phoneE164) : null;
-
   execute(
     `INSERT INTO clients
        (id, workshop_id, display_name, phone_e164, phone_search, other_contact,
         guardian_name, guardian_phone, notes, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      id,
-      input.workshopId,
-      input.displayName.trim(),
-      input.phoneE164 ?? null,
-      search,
-      input.otherContact ?? null,
-      input.guardianName ?? null,
-      input.guardianPhone ?? null,
-      input.notes ?? null,
-      input.actorUserId,
-      nowIso(),
-      nowIso(),
+      id, input.workshopId, input.displayName.trim(), input.phoneE164 ?? null,
+      input.phoneE164 ? normaliseDigits(input.phoneE164) : null,
+      input.otherContact ?? null, input.guardianName ?? null,
+      input.guardianPhone ?? null, input.notes ?? null, input.actorUserId,
+      nowIso(), nowIso(),
     ],
   );
-
   recordAudit({
     workshopId: input.workshopId,
     actorUserId: input.actorUserId,
@@ -110,14 +137,64 @@ export function createClient(input: CreateClientInput): string {
     entityId: id,
     after: { displayName: input.displayName },
   });
-
   return id;
 }
 
-/**
- * Possible duplicates by phone (§8.2). Returns candidates rather than
- * blocking: families legitimately share a number.
- */
+export type UpdateClientInput = CreateClientInput & { clientId: string };
+
+export function updateClient(input: UpdateClientInput): boolean {
+  const before = getClient(input.workshopId, input.clientId);
+  if (!before) return false;
+  const result = execute(
+    `UPDATE clients
+        SET display_name = ?, phone_e164 = ?, phone_search = ?, other_contact = ?,
+            guardian_name = ?, guardian_phone = ?, notes = ?, updated_at = ?,
+            row_version = row_version + 1
+      WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
+    [
+      input.displayName.trim(), input.phoneE164 ?? null,
+      input.phoneE164 ? normaliseDigits(input.phoneE164) : null,
+      input.otherContact ?? null, input.guardianName ?? null,
+      input.guardianPhone ?? null, input.notes ?? null, nowIso(),
+      input.workshopId, input.clientId,
+    ],
+  );
+  if (Number(result.changes) === 0) return false;
+  recordAudit({
+    workshopId: input.workshopId,
+    actorUserId: input.actorUserId,
+    action: "client.update",
+    entityKind: "client",
+    entityId: input.clientId,
+    before: { displayName: before.display_name, phone: before.phone_e164 },
+    after: { displayName: input.displayName, phone: input.phoneE164 ?? null },
+  });
+  return true;
+}
+
+export function softDeleteClient(params: {
+  workshopId: string;
+  clientId: string;
+  actorUserId: string;
+}): boolean {
+  const timestamp = nowIso();
+  const result = execute(
+    `UPDATE clients
+        SET deleted_at = ?, updated_at = ?, row_version = row_version + 1
+      WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
+    [timestamp, timestamp, params.workshopId, params.clientId],
+  );
+  if (Number(result.changes) === 0) return false;
+  recordAudit({
+    workshopId: params.workshopId,
+    actorUserId: params.actorUserId,
+    action: "client.delete",
+    entityKind: "client",
+    entityId: params.clientId,
+  });
+  return true;
+}
+
 export function findPossibleDuplicates(
   workshopId: string,
   phoneE164: string,
@@ -125,10 +202,10 @@ export function findPossibleDuplicates(
 ): ClientRow[] {
   const digits = normaliseDigits(phoneE164);
   if (!digits) return [];
-
   return query<ClientRow>(
     `SELECT * FROM clients
-      WHERE workshop_id = ? AND phone_search = ? AND (? IS NULL OR id <> ?)
+      WHERE workshop_id = ? AND phone_search = ? AND deleted_at IS NULL
+        AND (? IS NULL OR id <> ?)
       LIMIT 5`,
     [workshopId, digits, excludeId ?? null, excludeId ?? null],
   );
@@ -143,10 +220,9 @@ export function archiveClient(params: {
   execute(
     `UPDATE clients
         SET archived_at = ?, updated_at = ?, row_version = row_version + 1
-      WHERE workshop_id = ? AND id = ?`,
+      WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
     [params.archived ? nowIso() : null, nowIso(), params.workshopId, params.clientId],
   );
-
   recordAudit({
     workshopId: params.workshopId,
     actorUserId: params.actorUserId,
@@ -156,10 +232,6 @@ export function archiveClient(params: {
     after: { archived: params.archived },
   });
 }
-
-/* ---------------------------------------------------------------
-   Measurements (§8.3)
-   --------------------------------------------------------------- */
 
 export type MeasurementRow = {
   id: string;
@@ -182,7 +254,6 @@ export function listMeasurements(workshopId: string, clientId: string): Measurem
   );
 }
 
-/** Latest version per category — what a new order would default to. */
 export function latestMeasurements(workshopId: string, clientId: string): MeasurementRow[] {
   return query<MeasurementRow>(
     `SELECT m.* FROM measurement_records m
@@ -196,10 +267,6 @@ export function latestMeasurements(workshopId: string, clientId: string): Measur
   );
 }
 
-/**
- * Adds a new measurement version. Existing versions are never modified —
- * §8.3: "La modification crée une nouvelle version consultable."
- */
 export function addMeasurementVersion(params: {
   workshopId: string;
   clientId: string;
@@ -214,29 +281,19 @@ export function addMeasurementVersion(params: {
       WHERE client_id = ? AND category = ?`,
     [params.clientId, params.category],
   );
-
   const id = newId();
   const version = (previous?.max_version ?? 0) + 1;
-
   execute(
     `INSERT INTO measurement_records
        (id, workshop_id, client_id, category, version, values_json, unit,
         notes, taken_at, created_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, 'cm', ?, ?, ?, ?)`,
     [
-      id,
-      params.workshopId,
-      params.clientId,
-      params.category,
-      version,
-      JSON.stringify(params.values),
-      params.notes ?? null,
-      params.takenAt ?? nowIso().slice(0, 10),
-      params.actorUserId,
-      nowIso(),
+      id, params.workshopId, params.clientId, params.category, version,
+      JSON.stringify(params.values), params.notes ?? null,
+      params.takenAt ?? nowIso().slice(0, 10), params.actorUserId, nowIso(),
     ],
   );
-
   recordAudit({
     workshopId: params.workshopId,
     actorUserId: params.actorUserId,
@@ -245,11 +302,9 @@ export function addMeasurementVersion(params: {
     entityId: id,
     after: { category: params.category, version },
   });
-
   return id;
 }
 
-/** §8.3: warn when a reading is older than the configurable threshold. */
 export function isMeasurementStale(takenAt: string, monthsThreshold = 6): boolean {
   const limit = new Date();
   limit.setMonth(limit.getMonth() - monthsThreshold);

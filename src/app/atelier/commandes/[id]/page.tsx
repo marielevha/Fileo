@@ -7,6 +7,8 @@ import { requireWorkshop } from "@/lib/auth/guards";
 import { formatMoney, money, multiply, type CurrencyCode } from "@/lib/money";
 import { getOrder, ITEM_STATUS_LABELS, ORDER_STATE_LABELS, type ItemStatus } from "@/lib/repos/orders";
 import { listMovements, METHOD_LABELS, type MovementMethod } from "@/lib/repos/payments";
+import { localePath } from "@/lib/i18n/config";
+import { getLocale } from "@/lib/i18n/request";
 
 export const metadata: Metadata = {
   title: "Commande",
@@ -19,6 +21,7 @@ export default async function OrderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { workshop } = await requireWorkshop("orders.read");
+  const locale = await getLocale();
   const { id } = await params;
 
   const summary = getOrder(workshop.id, id, workshop.canViewMoney);
@@ -31,7 +34,7 @@ export default async function OrderDetailPage({
   return (
     <>
       <Link
-        href="/atelier/commandes"
+        href={localePath(locale, "/atelier/commandes")}
         className="text-base-content/60 hover:text-primary mb-4 inline-flex items-center gap-1.5 text-sm transition-colors"
       >
         <Icon name="arrowRight" className="h-4 w-4 rotate-180" />
@@ -105,7 +108,7 @@ export default async function OrderDetailPage({
               <div className="border-base-300 flex items-center justify-between border-b px-6 py-4">
                 <h2 className="font-display font-bold">Encaissements</h2>
                 <Link
-                  href={`/atelier/commandes/${order.id}/encaissement`}
+                  href={localePath(locale, `/atelier/commandes/${order.id}/encaissement`)}
                   className="btn btn-primary btn-sm"
                 >
                   Enregistrer un encaissement
@@ -204,7 +207,7 @@ export default async function OrderDetailPage({
           <section className="bg-base-100 border-base-300 rounded-2xl border p-6">
             <h2 className="font-display font-bold">Client</h2>
             <Link
-              href={`/atelier/clients/${order.client_id}`}
+              href={localePath(locale, `/atelier/clients/${order.client_id}`)}
               className="link link-primary mt-2 block text-sm"
             >
               {order.client_name}

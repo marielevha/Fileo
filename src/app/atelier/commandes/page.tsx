@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import PageHeader from "@/components/app/PageHeader";
+import OrderPageSizeSelect from "@/components/orders/OrderPageSizeSelect";
 import Icon from "@/components/ui/Icon";
 import { requireWorkshop } from "@/lib/auth/guards";
 import { formatMoney } from "@/lib/money";
-import { listOrders, ORDER_STATE_LABELS, type OrderState } from "@/lib/repos/orders";
+import { listOrdersPage, ORDER_STATE_LABELS, type OrderState } from "@/lib/repos/orders";
+import { localePath } from "@/lib/i18n/config";
+import { getLocale } from "@/lib/i18n/request";
 
 export const metadata: Metadata = {
   title: "Commandes",
@@ -20,10 +23,30 @@ const STATE_TONE: Record<OrderState, string> = {
   annulee: "badge-error",
 };
 
-export default async function OrdersPage() {
+export default async function OrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string; taille?: string }>;
+}) {
   const { workshop } = await requireWorkshop("orders.read");
+  const locale = await getLocale();
+  const params = await searchParams;
+  const requestedPageSize = Number(params.taille);
+  const pageSize = [10, 20, 50].includes(requestedPageSize) ? requestedPageSize : 10;
+  const result = listOrdersPage(workshop.id, {
+    includeMoney: workshop.canViewMoney,
+    page: Number(params.page) || 1,
+    pageSize,
+  });
+  const listPath = localePath(locale, "/atelier/commandes");
 
-  const orders = listOrders(workshop.id, { includeMoney: workshop.canViewMoney });
+  function pageHref(page: number) {
+    const next = new URLSearchParams();
+    if (pageSize !== 10) next.set("taille", String(pageSize));
+    if (page > 1) next.set("page", String(page));
+    const query = next.toString();
+    return query ? `${listPath}?${query}` : listPath;
+  }
 
   return (
     <>
@@ -31,27 +54,32 @@ export default async function OrdersPage() {
         title="Commandes"
         description="L'état affiché découle de l'avancement des articles."
         action={
-          <Link href="/atelier/commandes/nouvelle" className="btn btn-primary gap-2">
+          <Link href={localePath(locale, "/atelier/commandes/nouvelle")} className="btn btn-primary gap-2">
             <Icon name="arrowRight" className="h-4 w-4" />
             Nouvelle commande
           </Link>
         }
       />
 
-      {orders.length === 0 ? (
+      {result.total === 0 ? (
         <div className="bg-base-100 border-base-300 rounded-2xl border p-12 text-center">
           <p className="font-medium">Aucune commande enregistrée.</p>
           <p className="text-base-content/55 mt-1.5 text-sm">
             Créez une commande depuis une fiche client ou directement ici.
           </p>
-          <Link href="/atelier/commandes/nouvelle" className="btn btn-primary mt-6">
+          <Link href={localePath(locale, "/atelier/commandes/nouvelle")} className="btn btn-primary mt-6">
             Nouvelle commande
           </Link>
         </div>
       ) : (
-        <div className="bg-base-100 border-base-300 overflow-hidden rounded-2xl border">
-          <div className="overflow-x-auto">
-            <table className="table">
+        <>
+          <div className="mb-4 flex justify-end">
+            <OrderPageSizeSelect pageSize={pageSize} />
+          </div>
+
+          <div className="bg-base-100 border-base-300 overflow-hidden rounded-2xl border">
+            <div className="overflow-x-auto">
+              <table className="table">
               <thead>
                 <tr>
                   <th>Référence</th>
@@ -59,14 +87,15 @@ export default async function OrdersPage() {
                   <th>État</th>
                   <th>Échéance</th>
                   {workshop.canViewMoney ? <th className="text-right">Reste à payer</th> : null}
+                  <th className="text-right"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                {orders.map(({ order, state, balance, isLate }) => (
+                {result.items.map(({ order, state, balance, isLate }) => (
                   <tr key={order.id} className="hover:bg-base-200">
                     <td>
                       <Link
-                        href={`/atelier/commandes/${order.id}`}
+                        href={localePath(locale, `/atelier/commandes/${order.id}`)}
                         className="hover:text-primary font-medium transition-colors"
                       >
                         {order.reference}
@@ -92,12 +121,59 @@ export default async function OrdersPage() {
                         {balance ? formatMoney(balance.remainingDue) : "—"}
                       </td>
                     ) : null}
+                    <td className="text-right">
+                      <Link
+                        href={localePath(locale, `/atelier/commandes/${order.id}`)}
+                        aria-label={`Voir le détail de la commande ${order.reference}`}
+                        className="btn btn-ghost btn-sm gap-1.5"
+                      >
+                        Voir
+                        <Icon name="arrowRight" className="h-4 w-4" />
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
-        </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4 text-sm">
+            <p className="text-base-content/55">
+              {result.total} commande{result.total > 1 ? "s" : ""} - page {result.page} sur {result.pageCount}
+            </p>
+            {result.pageCount > 1 ? (
+              <nav aria-label="Pagination des commandes" className="join">
+                <Link
+                  href={pageHref(result.page - 1)}
+                  aria-disabled={result.page === 1}
+                  className={`btn btn-sm join-item ${result.page === 1 ? "btn-disabled" : ""}`}
+                >
+                  Précédent
+                </Link>
+                {Array.from({ length: result.pageCount }, (_, index) => index + 1)
+                  .filter((page) => Math.abs(page - result.page) <= 2 || page === 1 || page === result.pageCount)
+                  .map((page) => (
+                    <Link
+                      key={page}
+                      href={pageHref(page)}
+                      aria-current={page === result.page ? "page" : undefined}
+                      className={`btn btn-sm join-item ${page === result.page ? "btn-active" : ""}`}
+                    >
+                      {page}
+                    </Link>
+                  ))}
+                <Link
+                  href={pageHref(result.page + 1)}
+                  aria-disabled={result.page === result.pageCount}
+                  className={`btn btn-sm join-item ${result.page === result.pageCount ? "btn-disabled" : ""}`}
+                >
+                  Suivant
+                </Link>
+              </nav>
+            ) : null}
+          </div>
+        </>
       )}
 
       {!workshop.canViewMoney ? (

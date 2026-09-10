@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS clients (
   guardian_phone TEXT,
   notes          TEXT,
   archived_at    TEXT,
+  deleted_at     TEXT,
   created_by     TEXT NOT NULL REFERENCES users(id),
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
@@ -200,6 +201,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   -- 'a_realiser' | 'en_cours' | 'a_essayer' | 'pret' | 'remis' | 'annule'
   status             TEXT NOT NULL DEFAULT 'a_realiser',
   delivered_quantity INTEGER NOT NULL DEFAULT 0,
+  delivered_at       TEXT,
   cancelled_at       TEXT,
   sort_order         INTEGER NOT NULL DEFAULT 0,
   created_at         TEXT NOT NULL,
@@ -215,6 +217,7 @@ CREATE TABLE IF NOT EXISTS order_date_changes (
   id           TEXT PRIMARY KEY,
   workshop_id  TEXT NOT NULL REFERENCES workshops(id) ON DELETE CASCADE,
   order_id     TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  order_item_id TEXT REFERENCES order_items(id) ON DELETE CASCADE,
   previous_date TEXT,
   new_date     TEXT,
   reason       TEXT,

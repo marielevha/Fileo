@@ -94,6 +94,14 @@ export type OrderSummary = {
   isLate: boolean;
 };
 
+export type OrderPage = {
+  items: OrderSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+};
+
 /**
  * Derives the order state from its items.
  *
@@ -191,6 +199,36 @@ export function listOrders(
   );
 
   return rows.map((order) => buildSummary(order, options.includeMoney));
+}
+
+export function listOrdersPage(
+  workshopId: string,
+  options: { includeMoney: boolean; page?: number; pageSize?: number },
+): OrderPage {
+  const pageSize = Math.min(50, Math.max(1, Math.trunc(options.pageSize ?? 10)));
+  const total = queryOne<{ total: number }>(
+    "SELECT COUNT(*) AS total FROM orders WHERE workshop_id = ?",
+    [workshopId],
+  )?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(pageCount, Math.max(1, Math.trunc(options.page ?? 1)));
+  const rows = query<OrderRow>(
+    `SELECT o.*, c.display_name AS client_name
+       FROM orders o
+       JOIN clients c ON c.id = o.client_id
+      WHERE o.workshop_id = ?
+      ORDER BY o.created_at DESC, o.id DESC
+      LIMIT ? OFFSET ?`,
+    [workshopId, pageSize, (page - 1) * pageSize],
+  );
+
+  return {
+    items: rows.map((order) => buildSummary(order, options.includeMoney)),
+    total,
+    page,
+    pageSize,
+    pageCount,
+  };
 }
 
 export function getOrder(

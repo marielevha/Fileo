@@ -60,6 +60,12 @@ function report(label, actual, expected) {
 const owner = mintSession("+242061111111");
 const collaborator = mintSession("+242062222222");
 const staff = mintSession("+242060000001");
+const sampleClient = db.prepare(
+  "SELECT id, display_name FROM clients WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1",
+).get();
+const sampleOrder = db.prepare(
+  "SELECT id, reference FROM orders ORDER BY created_at LIMIT 1",
+).get();
 
 console.log("\nPages publiques\n");
 for (const path of ["/fr", "/en", "/lg", "/fr/connexion", "/fr/inscription", "/fr/mentions-legales", "/fr/cgv"]) {
@@ -116,11 +122,32 @@ for (const path of ["/fr/atelier", "/fr/atelier/clients", "/fr/admin"]) {
 }
 
 console.log("\nResponsable d'atelier (droit financier)\n");
-for (const path of ["/fr/atelier", "/fr/atelier/clients", "/fr/atelier/commandes"]) {
+for (const path of [
+  "/fr/atelier",
+  "/fr/atelier/clients",
+  "/fr/atelier/clients/nouveau",
+  `/fr/atelier/clients/${sampleClient.id}`,
+  `/fr/atelier/clients/${sampleClient.id}/modifier`,
+  "/fr/atelier/commandes",
+  `/fr/atelier/commandes/${sampleOrder.id}`,
+  "/fr/atelier/planning",
+  "/fr/atelier/planning?vue=jour",
+  "/fr/atelier/planning?vue=semaine",
+  "/fr/atelier/planning?filtre=retard",
+]) {
   report(path, (await get(path, owner)).status, 200);
 }
 
+const searchedClients = await get("/fr/atelier/clients?q=Chancelvie&sort=orders&dir=desc&taille=10", owner);
+report("recherche client trouve Chancelvie", searchedClients.body.includes("Chancelvie"), true);
+report("recherche client filtre Grace", !searchedClients.body.includes("Grâce Bouiti"), true);
+
 const ownerOrders = await get("/fr/atelier/commandes", owner);
+report(
+  "la liste pointe vers le détail commande",
+  ownerOrders.body.includes(`href="/fr/atelier/commandes/${sampleOrder.id}"`),
+  true,
+);
 const hasColumn = /Reste . payer/.test(ownerOrders.body);
 const hasAmount = /7[\s  ]500/.test(ownerOrders.body);
 report("colonne « Reste à payer » visible", hasColumn, true);
@@ -128,13 +155,18 @@ report("montant 7 500 transmis", hasAmount, true);
 
 console.log("\nCollaborateur sans droit financier — REC-12\n");
 const collabOrders = await get("/fr/atelier/commandes", collaborator);
+const collabOrderDetail = await get(`/fr/atelier/commandes/${sampleOrder.id}`, collaborator);
+const collabPlanning = await get("/fr/atelier/planning", collaborator);
 report("/atelier/commandes accessible", collabOrders.status, 200);
+report("détail commande accessible", collabOrderDetail.status, 200);
+report("planning collaborateur accessible", collabPlanning.status, 200);
 report(
   "aucune colonne « Reste à payer »",
   !/Reste . payer/.test(collabOrders.body),
   true,
 );
 report("aucun montant dans la réponse", !/7[\s  ]500/.test(collabOrders.body), true);
+report("aucun montant dans le détail", !/7[\s  ]500/.test(collabOrderDetail.body), true);
 report("/admin refusé", (await get("/fr/admin", collaborator)).status, 307);
 
 console.log("\nÉquipe Filéo — back-office\n");

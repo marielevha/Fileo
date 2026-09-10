@@ -34,6 +34,24 @@ function open(): DatabaseSync {
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(readFileSync(SCHEMA_PATH, "utf8"));
 
+  // Forward migration for databases created before client soft deletion.
+  const clientColumns = db.prepare("PRAGMA table_info(clients)").all() as { name: string }[];
+  if (!clientColumns.some((column) => column.name === "deleted_at")) {
+    db.exec("ALTER TABLE clients ADD COLUMN deleted_at TEXT");
+  }
+
+  const itemColumns = db.prepare("PRAGMA table_info(order_items)").all() as { name: string }[];
+  if (!itemColumns.some((column) => column.name === "delivered_at")) {
+    db.exec("ALTER TABLE order_items ADD COLUMN delivered_at TEXT");
+    db.exec("UPDATE order_items SET delivered_at = updated_at WHERE status = 'remis'");
+  }
+
+  const dateChangeColumns = db.prepare("PRAGMA table_info(order_date_changes)").all() as { name: string }[];
+  if (!dateChangeColumns.some((column) => column.name === "order_item_id")) {
+    db.exec("ALTER TABLE order_date_changes ADD COLUMN order_item_id TEXT REFERENCES order_items(id)");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_order_date_changes_item ON order_date_changes(order_item_id, changed_at DESC)");
+
   return db;
 }
 

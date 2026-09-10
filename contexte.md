@@ -3,6 +3,10 @@
 > Document de reprise. À lire en premier au début d'une nouvelle session.
 > Dernière mise à jour : 10 septembre 2026.
 
+**Branche active :** `feature/dashboard-atelier`, basée sur le commit
+`1097264`. Les développements clients, commandes et planning décrits ci-dessous
+sont regroupés dans le commit qui accompagne cette mise à jour.
+
 ---
 
 ## 1. Ce qu'est ce projet
@@ -34,15 +38,12 @@ passé dans l'historique de conversation.
 Le poste est **managé avec un filtrage sortant délibéré**. Trois contournements
 sont en place ; les défaire casse le projet.
 
-### Node.js est portable, pas installé
+### Node.js et PowerShell
 
-Les installeurs MSI sont bloqués par stratégie de groupe (code 1625). Node
-**v24.21.0** vit dans [`.tools/node/`](.tools/node/) (~38 Mo, gitignoré).
-
-```powershell
-# À faire dans CHAQUE nouveau terminal, sinon `node` est introuvable :
-$env:Path = "C:\Users\mabir\Music\maeva\clover\.tools\node;" + $env:Path
-```
+Node **v24.19.0** est installé dans `C:\Program Files\nodejs\node.exe`.
+PowerShell bloque `npm.ps1` par sa stratégie d'exécution : utiliser **`npm.cmd`**
+dans les commandes automatisées. `npm` peut fonctionner depuis un terminal
+`cmd.exe`, mais `npm.cmd` reste la forme la plus fiable ici.
 
 ### Le registre npm est filtré
 
@@ -76,14 +77,17 @@ pas dans la v20.
 ## 3. Commandes
 
 ```powershell
-$env:Path = "C:\Users\mabir\Music\maeva\clover\.tools\node;" + $env:Path
-
-npm run dev            # http://localhost:3000
-npm run db:seed        # crée data/fileo.db + jeu de démonstration
-npm run db:reset       # supprime data/ puis reseed
-npm run check:money    # 9 contrôles : formules §8.7 + contraintes de schéma
-npm run check:smoke    # 21 contrôles : routes et permissions par rôle
-npx tsc --noEmit       # typecheck
+npm.cmd run dev             # http://localhost:3000
+npm.cmd run build           # build de production (accès Google Fonts requis)
+npm.cmd run db:seed         # crée data/fileo.db + jeu de démonstration
+npm.cmd run db:reset        # supprime data/ puis reseed
+npm.cmd run check:money     # formules §8.7 + contraintes de schéma
+npm.cmd run check:clients   # CRUD, recherche, tris, pagination, deleted_at
+npm.cmd run check:orders    # pagination de la liste des commandes
+npm.cmd run check:planning  # replanification, affectation, remise, audit
+npm.cmd run check:smoke     # routes, locales et permissions par rôle
+npm.cmd run lint            # ESLint
+npm.cmd exec tsc -- --noEmit
 ```
 
 ### Comptes de démonstration
@@ -159,10 +163,16 @@ Erreurs déjà commises et corrigées. Les reproduire coûterait du temps.
 - **Un commentaire JSX ne peut pas suivre directement `return (`.**
   Utiliser un commentaire `//` au-dessus du `return`.
 
-- **Les Server Actions ne se testent pas par un POST HTTP brut** — il faut
-  l'en-tête `Next-Action`. Pour tester les pages protégées, utiliser
-  [`scripts/mint-session.mjs`](scripts/mint-session.mjs) qui forge un cookie de
-  session valide en base, ou directement `npm run check:smoke`.
+- **Les Server Actions liées à un formulaire doivent conserver les champs
+  cachés générés par Next.js.** Les scripts `check-clients.mjs` et
+  `check-planning.mjs` chargent d'abord la page, extraient ces champs, puis
+  soumettent un `FormData`. Un POST reconstruit à la main sans ces champs ne
+  déclenche pas l'action attendue.
+
+- **Après une évolution de schéma en développement, redémarrer `next dev`.**
+  La connexion SQLite survit au rechargement à chaud dans `globalThis`; une
+  nouvelle migration de démarrage ne s'applique donc qu'après réouverture du
+  processus.
 
 - **Ne pas comparer les couleurs en chaînes littérales.** daisyUI émet
   `oklch(15% 0.09 281.288)` là où le CSS d'origine écrit `.09` — même valeur,
@@ -189,12 +199,15 @@ src/
 │  ├─ sections/         sections du site public
 │  ├─ app/              coquille des espaces connectés (AppNav, UserMenu…)
 │  ├─ auth/             PhoneField
+│  ├─ clients/          formulaire, filtres et suppression client
+│  ├─ orders/           contrôles de pagination des commandes
+│  ├─ planning/         filtres, navigation temporelle et éditeur de tâche
 │  └─ ui/               Icon, Reveal, SectionHeading, PageHero, CookieBanner
 └─ lib/
    ├─ db/               index.ts (connexion) + schema.sql (21 tables)
    ├─ auth/             password.ts, session.ts, guards.ts
-   ├─ repos/            clients, orders, payments, dashboard, contents, admin
-   ├─ actions/          auth, admin, contact (Server Actions)
+   ├─ repos/            clients, orders, planning, payments, dashboard…
+   ├─ actions/          auth, clients, planning, admin, contact
    ├─ money.ts          arithmétique monétaire
    ├─ permissions.ts    matrice du §4.2
    ├─ phone.ts          E.164 pour CG/CD, lien WhatsApp
@@ -261,9 +274,33 @@ atteignables par le pied de page et par des liens « voir tout ».
   FAQ, téléchargement), faq, prise-en-main, nouveautés, contact, 3 pages
   légales. Tarifs, FAQ, tutoriels et actualités sont **lus en base**, donc
   éditables depuis le back-office.
-- **Espace atelier** : tableau de bord (§8.1), clients avec recherche par
-  téléphone normalisé, liste des commandes avec état **dérivé**, détail de
-  commande avec les soldes du §8.7.
+- **Internationalisation** : routes et sélecteur cohérents en français (`fr`),
+  anglais (`en`) et lingala (`lg`). Les traductions du site public ont été
+  harmonisées pour éviter les mélanges de langue.
+- **Tarifs** : offre Pro à **5 000 FCFA** avec capacités supérieures, intégrée
+  au parcours d'inscription en plus de l'offre initiale.
+- **Clients (§8.2)** : ajout, consultation, modification, archivage et
+  suppression logique via `deleted_at`. Recherche directe temporisée, recherche
+  par téléphone normalisé, tris serveur, pagination 10/20/50 et protection par
+  atelier. Les commandes liées sont conservées après suppression logique.
+- **Commandes (§8.4)** : liste avec état **dérivé**, accès explicite à la fiche
+  depuis la référence ou le bouton « Voir », pagination serveur 10/20/50 et
+  liens localisés. La fiche détail conserve le filtrage financier REC-12 et les
+  liens retour/client/encaissement respectent la locale.
+- **Planning (§8.6)** : vues liste, jour et semaine ; navigation temporelle ;
+  recherche directe ; filtres par collaborateur et état ; raccourcis aujourd'hui,
+  sept jours, retards et prêts. Les événements distinguent échéance d'article,
+  date promise, essayage et remise effective. Une tâche peut être affectée,
+  replanifiée et changer d'état depuis une modale.
+- **Fiabilité du planning** : changements transactionnels, contrôle optimiste
+  par `row_version`, motif obligatoire pour changement de date, annulation ou
+  retour en arrière, historique dans `order_date_changes`, date de remise
+  explicite `delivered_at`, quantité remise cohérente et audit serveur.
+- **Style du planning** : indicateurs présentés comme les cartes du dashboard
+  (`accent-1|2|3`, grands chiffres, `card-lift`) et surfaces fonctionnelles à
+  contours arrondis.
+- **Redirection administrateur** : après connexion, un membre de l'équipe Filéo
+  arrive sur `/admin` au lieu de la route atelier inexistante `/creer-atelier`.
 - **Back-office** : tableau de bord (recettes par devise, jamais mélangées),
   ateliers, validation des règlements avec prolongation d'abonnement (REC-17).
 
@@ -272,10 +309,11 @@ atteignables par le pied de page et par des liens « voir tout ».
 1. **Vérification du téléphone (§7.1 AUTH-01)** — aucun fournisseur SMS retenu.
    Les comptes sont actifs dès la création. **Bloquant avant toute ouverture
    publique des inscriptions.**
-2. **Formulaires de création** : client, commande, encaissement. Sans eux
-   l'atelier n'est pas réellement utilisable — seules les listes existent.
+2. **Formulaires de création** : commande et encaissement. Le formulaire client
+   est terminé et testé.
 3. **Pages atelier manquantes** (la navigation y renvoie déjà, elles renvoient
-   404) : planning, paiements, dépenses, équipe, abonnement, paramètres.
+   404) : paiements, dépenses, équipe, abonnement, paramètres. Le planning est
+   désormais implémenté.
 4. **Pages admin manquantes** : offres, contenus, tickets, audit.
    Les tickets créés par `/contact` s'accumulent en base sans écran pour les lire.
 5. Photos et pièces jointes (§8.5), reçus et exports (§8.8).
@@ -288,13 +326,27 @@ atteignables par le pied de page et par des liens « voir tout ».
 
 ### Scénarios de recette couverts
 
-`npm run check:money` couvre REC-03, REC-05, REC-10, le plafonnement de la
+`npm.cmd run check:money` couvre REC-03, REC-05, REC-10, le plafonnement de la
 réduction (§8.4), l'arithmétique entière (§15.3), les contraintes
 d'idempotence (REC-04, REC-17) et la présence de `workshop_id` (§16).
 
-`npm run check:smoke` couvre **REC-12** pour de bon : le collaborateur sans
+`npm.cmd run check:clients` exécute un parcours HTTP authentifié complet :
+création, modification, recherche, tris ascendant/descendant, pagination sur
+deux pages, suppression logique et nettoyage des données temporaires.
+
+`npm.cmd run check:orders` injecte temporairement onze commandes, vérifie les
+pages 1 et 2 et restaure la base. `npm.cmd run check:planning` modifie réellement
+une échéance, une affectation et un état, vérifie la remise, l'historique et
+l'audit, puis restaure exactement l'article de démonstration.
+
+`npm.cmd run check:smoke` couvre **REC-12** pour de bon : le collaborateur sans
 droit financier reçoit la page des commandes sans la colonne « Reste à payer »
-ni le montant dans le HTML.
+ni le montant dans le HTML. Il vérifie aussi les routes détail commande et les
+vues liste/jour/semaine du planning pour le responsable et le collaborateur.
+
+Dernière validation complète : TypeScript, ESLint, `check:money`,
+`check:clients`, `check:orders`, `check:planning`, `check:smoke` et build Next.js
+de production réussis le 10 septembre 2026.
 
 Non couverts, car ils exigent des tests d'intégration ou le client mobile :
 REC-08, REC-09, REC-11, REC-14 à REC-16, REC-19 à REC-24.
@@ -317,6 +369,10 @@ Conventions du schéma :
 - dates `TEXT` ISO-8601
 - `row_version` incrémenté à chaque écriture (préparation des conflits §10.3)
 - `workshop_id` sur chaque table métier
+- `clients.deleted_at` porte la suppression logique des clients
+- `order_items.delivered_at` porte la remise effective, distincte de l'échéance
+- `order_date_changes.order_item_id` rattache une replanification à l'article
+  exact ; les anciennes bases sont migrées au démarrage dans `src/lib/db/index.ts`
 
 ---
 
@@ -327,8 +383,9 @@ Le cahier est explicite sur ce qu'il ne faut **pas** faire. Rappels :
 - Ne jamais afficher de faux avis, chiffres clients inventés ou lien de
   téléchargement factice. Les drapeaux `appStores` de `site.ts` affichent
   « bientôt disponible » tant que les applications ne sont pas publiées (§6.2).
-- Le tarif de 2 500 FCFA concerne **le Congo-Brazzaville**. L'offre RDC n'est
-  pas définie et ne doit pas être affichée comme validée (§2.3).
+- Les tarifs de 2 500 FCFA et l'offre Pro à 5 000 FCFA concernent
+  **le Congo-Brazzaville**. L'offre RDC n'est pas définie et ne doit pas être
+  affichée comme validée (§2.3).
 - Ne pas promettre « illimité » avant arbitrage sur les plafonds (§11.1).
 - Filéo prépare un message WhatsApp, il ne peut jamais affirmer qu'il a été
   envoyé, reçu ou lu (§8.10).
