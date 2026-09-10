@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="fileo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f472b6" />
+      <stop offset="100%" stop-color="#7dd3fc" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#fileo)" />
+  <g fill="none" stroke="#2a0f3d" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.6 5.9C15.8 4.8 11.7 7.2 12 10.8c.3 3.4 4.7 3.6 5.7 6.4.7 2-.7 3.9-2.5 4.5"
+          stroke-width="1.7" opacity=".8" />
+    <ellipse cx="22.6" cy="8" rx="2.1" ry="2.9" transform="rotate(37 22.6 8)" stroke-width="1.7" />
+    <path d="M21 10.7 10.4 25" stroke-width="2.1" />
+  </g>
+  <path d="M10.4 25 7.5 28.7 10 26.2Z" fill="#2a0f3d" />
+</svg>

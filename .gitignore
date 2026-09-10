@@ -1,0 +1,17 @@
+node_modules/
+
+# Base SQLite de développement (recréable via `npm run db:seed`).
+data/
+
+# Portable Node.js toolchain (MSI installs are blocked by org policy here).
+.tools/
+
+.next/
+out/
+build/
+.env*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+.vercel

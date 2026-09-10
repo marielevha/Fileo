@@ -1,0 +1,218 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+/* ===============================================================
+   Themes — the exact pair the reference site uses.
+
+   daisyUI ships both token sets, so they are enabled by name rather
+   than copied: no duplicated list of colours to drift out of sync.
+   `synthwave` supplies the violet ground and the pink / cyan / amber
+   triad that the accent rotation below is built on.
+   =============================================================== */
+
+@plugin "daisyui" {
+  themes:
+    light --default,
+    synthwave --prefersdark;
+}
+
+/* ===============================================================
+   Design tokens
+   =============================================================== */
+
+@theme {
+  /* next/font injects these variables on <html>. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-outfit), var(--font-inter), ui-sans-serif, sans-serif;
+
+  --text-display: clamp(2.75rem, 1.6rem + 5vw, 5rem);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Clear the floating navbar when jumping to an anchor. */
+    scroll-padding-top: 6.5rem;
+  }
+
+  body {
+    @apply bg-base-100 text-base-content font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.025em;
+  }
+
+  ::selection {
+    @apply bg-primary text-primary-content;
+  }
+
+  /* One consistent focus ring everywhere. */
+  :focus-visible {
+    @apply outline-primary rounded-sm outline-2 outline-offset-3;
+  }
+}
+
+/* ===============================================================
+   Accent rotation
+   Each card sets --accent from the brand triad; every tinted part
+   of the card (icon tile, title, badges, glow) then reads that one
+   variable, so a card only ever declares its colour once.
+   =============================================================== */
+
+@utility accent-1 {
+  --accent: var(--color-primary);
+  --accent-content: var(--color-primary-content);
+}
+
+@utility accent-2 {
+  --accent: var(--color-secondary);
+  --accent-content: var(--color-secondary-content);
+}
+
+@utility accent-3 {
+  --accent: var(--color-accent);
+  --accent-content: var(--color-accent-content);
+}
+
+@utility text-gradient {
+  @apply from-primary via-secondary to-accent bg-gradient-to-r bg-clip-text text-transparent;
+}
+
+@utility text-gradient-brand {
+  @apply from-primary to-secondary bg-gradient-to-br bg-clip-text text-transparent;
+}
+
+/* Decorative blurred blobs behind the hero. */
+@utility blob {
+  @apply pointer-events-none absolute rounded-full blur-3xl;
+}
+
+/* Card that lifts and picks up an accent-tinted glow on hover. */
+@utility card-lift {
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s ease,
+    border-color 0.35s ease;
+
+  &:hover {
+    transform: translateY(-6px);
+    border-color: color-mix(in oklab, var(--accent, var(--color-primary)) 45%, transparent);
+    box-shadow:
+      0 18px 40px -18px color-mix(in oklab, var(--accent, var(--color-primary)) 55%, transparent),
+      0 2px 8px -4px rgb(0 0 0 / 0.25);
+  }
+}
+
+/* ===============================================================
+   Animations
+   =============================================================== */
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-24px) scale(1.05);
+  }
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes nudge {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(8px);
+    opacity: 1;
+  }
+}
+
+.animate-float {
+  animation: float 14s ease-in-out infinite;
+}
+.animate-bob {
+  animation: bob 6s ease-in-out infinite;
+}
+.animate-fade-up {
+  animation: fade-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-marquee {
+  animation: marquee 38s linear infinite;
+}
+.animate-nudge {
+  animation: nudge 2.2s ease-in-out infinite;
+}
+
+/* Progressive reveal driven by IntersectionObserver (see Reveal.tsx). */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .animate-float,
+  .animate-bob,
+  .animate-fade-up,
+  .animate-marquee,
+  .animate-nudge {
+    animation: none;
+  }
+
+  .card-lift:hover {
+    transform: none;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
