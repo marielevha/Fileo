@@ -5,11 +5,21 @@ import { useEffect, useState } from "react";
 import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
 import Icon from "@/components/ui/Icon";
-import { navLinks } from "@/lib/site";
+import LanguageSwitcher from "./LanguageSwitcher";
+import { localePath, type Locale } from "@/lib/i18n/config";
+import { getMessages } from "@/lib/i18n/messages";
 
-export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
+export default function Navbar({ signedIn = false, locale }: { signedIn?: boolean; locale: Locale }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const copy = getMessages(locale);
+  const navLinks = [
+    { href: "/#fonctionnalites", label: copy.nav.features },
+    { href: "/#tarifs", label: copy.nav.pricing },
+    { href: "/#prise-en-main", label: copy.nav.gettingStarted },
+    { href: "/#faq", label: copy.nav.faq },
+    { href: "/nouveautes", label: copy.nav.news },
+  ];
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -34,7 +44,7 @@ export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
       }`}
     >
       <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <Link href="/" className="shrink-0" aria-label="Filéo — accueil">
+        <Link href={localePath(locale, "/")} className="shrink-0" aria-label={copy.nav.home}>
           <Logo />
         </Link>
 
@@ -42,7 +52,7 @@ export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
           {navLinks.map((link) => (
             <li key={link.href}>
               <Link
-                href={link.href}
+                href={localePath(locale, link.href)}
                 className="hover:bg-base-100 hover:text-primary rounded-full px-4 py-2 text-sm font-medium transition-colors"
               >
                 {link.label}
@@ -53,24 +63,25 @@ export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
 
         <div className="flex items-center gap-2">
           {signedIn ? (
-            <Link href="/atelier" className="btn btn-primary btn-sm hidden shadow-md sm:inline-flex">
-              Mon atelier
+            <Link href={localePath(locale, "/atelier")} className="btn btn-primary btn-sm hidden shadow-md sm:inline-flex">
+              {copy.nav.workshop}
             </Link>
           ) : (
             <>
-              <Link href="/connexion" className="btn btn-ghost btn-sm hidden sm:inline-flex">
-                Connexion
+              <Link href={localePath(locale, "/connexion")} className="btn btn-ghost btn-sm hidden sm:inline-flex">
+                {copy.nav.signIn}
               </Link>
               <Link
-                href="/inscription"
+                href={localePath(locale, "/inscription")}
                 className="btn btn-primary btn-sm hidden shadow-md sm:inline-flex"
               >
-                Créer mon atelier
+                {copy.nav.signUp}
               </Link>
             </>
           )}
 
           <ThemeToggle />
+          <LanguageSwitcher locale={locale} label={copy.nav.chooseLanguage} />
 
           <button
             type="button"
@@ -78,7 +89,7 @@ export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
             className="btn btn-ghost btn-circle lg:hidden"
             aria-expanded={open}
             aria-controls="mobile-menu"
-            aria-label={open ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-label={open ? copy.nav.closeMenu : copy.nav.openMenu}
           >
             <Icon name={open ? "close" : "menu"} className="h-5 w-5" />
           </button>
@@ -94,7 +105,7 @@ export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
           {navLinks.map((link) => (
             <li key={link.href}>
               <Link
-                href={link.href}
+                href={localePath(locale, link.href)}
                 onClick={() => setOpen(false)}
                 className="hover:bg-base-200 hover:text-primary block rounded-xl px-4 py-3 font-medium transition-colors"
               >
@@ -104,24 +115,24 @@ export default function Navbar({ signedIn = false }: { signedIn?: boolean }) {
           ))}
           <li className="flex flex-col gap-2 pt-2">
             {signedIn ? (
-              <Link href="/atelier" onClick={() => setOpen(false)} className="btn btn-primary w-full">
-                Mon atelier
+              <Link href={localePath(locale, "/atelier")} onClick={() => setOpen(false)} className="btn btn-primary w-full">
+                {copy.nav.workshop}
               </Link>
             ) : (
               <>
                 <Link
-                  href="/connexion"
+                  href={localePath(locale, "/connexion")}
                   onClick={() => setOpen(false)}
                   className="btn btn-outline w-full"
                 >
-                  Connexion
+                  {copy.nav.signIn}
                 </Link>
                 <Link
-                  href="/inscription"
+                  href={localePath(locale, "/inscription")}
                   onClick={() => setOpen(false)}
                   className="btn btn-primary w-full"
                 >
-                  Créer mon atelier
+                  {copy.nav.signUp}
                 </Link>
               </>
             )}

@@ -1,8 +1,12 @@
 import Link from "next/link";
 import Icon from "@/components/ui/Icon";
-import { heroPoints, site } from "@/lib/site";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 
-export default function Hero() {
+export default async function Hero() {
+  const locale = await getLocale();
+  const copy = getMessages(locale).home;
   return (
     <section className="relative flex min-h-[92vh] items-center overflow-hidden pt-28 pb-20">
       <div aria-hidden="true" className="absolute inset-0 -z-10">
@@ -22,19 +26,19 @@ export default function Hero() {
         <div className="animate-fade-up">
           <span className="bg-primary/12 text-primary ring-primary/25 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ring-1">
             <Icon name="sparkles" className="h-4 w-4" />
-            Pour les ateliers de couture
+            {copy.eyebrow}
           </span>
 
           <h1 className="font-display mt-7 text-[length:var(--text-display)] leading-[0.95] font-extrabold">
-            <span className="text-gradient-brand">{site.tagline}</span>
+            <span className="text-gradient-brand">{copy.title}</span>
           </h1>
 
           <p className="text-base-content/80 mt-6 max-w-xl text-lg leading-relaxed text-pretty sm:text-xl">
-            {site.description}
+            {copy.intro}
           </p>
 
           <ul className="mt-8 space-y-3">
-            {heroPoints.map((point) => (
+            {copy.heroPoints.map((point) => (
               <li key={point} className="flex items-start gap-3">
                 <span className="bg-success/15 text-success mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full">
                   <Icon name="check" className="h-3 w-3" strokeWidth={3} />
@@ -45,12 +49,12 @@ export default function Hero() {
           </ul>
 
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link href="/inscription" className="btn btn-primary btn-lg gap-2 shadow-lg">
-              Créer mon atelier
+            <Link href={localePath(locale, "/inscription")} className="btn btn-primary btn-lg gap-2 shadow-lg">
+              {copy.primaryCta}
               <Icon name="arrowRight" className="h-5 w-5" />
             </Link>
-            <Link href="/#fonctionnalites" className="btn btn-outline btn-lg">
-              Voir les fonctionnalités
+            <Link href={localePath(locale, "/#fonctionnalites")} className="btn btn-outline btn-lg">
+              {copy.secondaryCta}
             </Link>
           </div>
 

@@ -62,29 +62,29 @@ const collaborator = mintSession("+242062222222");
 const staff = mintSession("+242060000001");
 
 console.log("\nPages publiques\n");
-for (const path of ["/", "/connexion", "/inscription", "/mentions-legales", "/cgv"]) {
+for (const path of ["/fr", "/en", "/lg", "/fr/connexion", "/fr/inscription", "/fr/mentions-legales", "/fr/cgv"]) {
   report(path, (await get(path)).status, 200);
 }
 
 console.log("\nSans session — redirection attendue\n");
-for (const path of ["/atelier", "/atelier/clients", "/admin"]) {
+for (const path of ["/fr/atelier", "/fr/atelier/clients", "/fr/admin"]) {
   const res = await get(path);
   report(`${path} → ${res.location ?? "?"}`, res.status, 307);
 }
 
 console.log("\nResponsable d'atelier (droit financier)\n");
-for (const path of ["/atelier", "/atelier/clients", "/atelier/commandes"]) {
+for (const path of ["/fr/atelier", "/fr/atelier/clients", "/fr/atelier/commandes"]) {
   report(path, (await get(path, owner)).status, 200);
 }
 
-const ownerOrders = await get("/atelier/commandes", owner);
+const ownerOrders = await get("/fr/atelier/commandes", owner);
 const hasColumn = /Reste . payer/.test(ownerOrders.body);
 const hasAmount = /7[\s  ]500/.test(ownerOrders.body);
 report("colonne « Reste à payer » visible", hasColumn, true);
 report("montant 7 500 transmis", hasAmount, true);
 
 console.log("\nCollaborateur sans droit financier — REC-12\n");
-const collabOrders = await get("/atelier/commandes", collaborator);
+const collabOrders = await get("/fr/atelier/commandes", collaborator);
 report("/atelier/commandes accessible", collabOrders.status, 200);
 report(
   "aucune colonne « Reste à payer »",
@@ -92,10 +92,10 @@ report(
   true,
 );
 report("aucun montant dans la réponse", !/7[\s  ]500/.test(collabOrders.body), true);
-report("/admin refusé", (await get("/admin", collaborator)).status, 307);
+report("/admin refusé", (await get("/fr/admin", collaborator)).status, 307);
 
 console.log("\nÉquipe Filéo — back-office\n");
-for (const path of ["/admin", "/admin/ateliers", "/admin/reglements"]) {
+for (const path of ["/fr/admin", "/fr/admin/ateliers", "/fr/admin/reglements"]) {
   report(path, (await get(path, staff)).status, 200);
 }
 

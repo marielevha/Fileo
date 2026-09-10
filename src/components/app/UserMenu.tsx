@@ -1,9 +1,10 @@
 import Link from "next/link";
 import Icon from "@/components/ui/Icon";
 import { signOut } from "@/lib/actions/auth";
+import { localePath, type Locale } from "@/lib/i18n/config";
 
 /** Account dropdown. Sign-out is a form so it stays a POST, never a GET link. */
-export default function UserMenu({ name, role }: { name: string; role: string }) {
+export default function UserMenu({ name, role, locale }: { name: string; role: string; locale: Locale }) {
   const initials = name
     .split(" ")
     .map((part) => part[0])
@@ -30,7 +31,7 @@ export default function UserMenu({ name, role }: { name: string; role: string })
         <ul className="py-1">
           <li>
             <Link
-              href="/atelier/parametres"
+              href={localePath(locale, "/atelier/parametres")}
               className="hover:bg-base-200 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors"
             >
               <Icon name="wrench" className="h-4 w-4" />
@@ -39,7 +40,7 @@ export default function UserMenu({ name, role }: { name: string; role: string })
           </li>
           <li>
             <Link
-              href="/prise-en-main"
+              href={localePath(locale, "/prise-en-main")}
               className="hover:bg-base-200 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors"
             >
               <Icon name="sparkles" className="h-4 w-4" />

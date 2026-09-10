@@ -3,14 +3,17 @@ import Reveal from "@/components/ui/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { accentAt } from "@/lib/accents";
 import { features } from "@/lib/site";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
 
-export default function Features() {
+export default async function Features() {
+  const copy = getMessages(await getLocale()).home;
   return (
     <section id="fonctionnalites" className="bg-base-100 py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <SectionHeading
-          title="Tout l'atelier au même endroit"
-          subtitle="Les mêmes données et les mêmes règles sur le web et sur le téléphone."
+          title={copy.featuresTitle}
+          subtitle={copy.featuresSubtitle}
         />
 
         <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -23,11 +26,11 @@ export default function Features() {
                   </span>
 
                   <h3 className="font-display mt-5 text-lg font-bold text-[color:var(--accent)]">
-                    {feature.title}
+                    {copy.features[index][0]}
                   </h3>
 
                   <p className="text-base-content/70 mt-3 text-sm leading-relaxed text-pretty">
-                    {feature.text}
+                    {copy.features[index][1]}
                   </p>
 
                   <ul className="mt-auto flex flex-wrap gap-2 pt-6">

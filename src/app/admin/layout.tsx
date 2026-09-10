@@ -5,10 +5,16 @@ import AppNav from "@/components/app/AppNav";
 import UserMenu from "@/components/app/UserMenu";
 import { requireAdmin } from "@/lib/auth/guards";
 import { canInAdmin } from "@/lib/permissions";
+import LanguageSwitcher from "@/components/layout/LanguageSwitcher";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 
 /** Back-office shell (§12). Menu entries follow the caller's habilitations. */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, actor } = await requireAdmin();
+  const locale = await getLocale();
+  const copy = getMessages(locale);
 
   const items = [
     { href: "/admin", label: "Tableau de bord", icon: "layout", exact: true },
@@ -30,14 +36,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     ...(canInAdmin(actor, "admin.audit")
       ? [{ href: "/admin/audit", label: "Audit", icon: "clock" }]
       : []),
-  ];
+  ].map((item) => ({ ...item, href: localePath(locale, item.href) }));
 
   return (
     <div className="bg-base-200 min-h-screen">
       <header className="bg-base-100/80 border-base-300 sticky top-0 z-40 border-b backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-4">
-            <Link href="/admin" aria-label="Filéo — back-office">
+            <Link href={localePath(locale, "/admin")} aria-label="Filéo - back-office">
               <Logo />
             </Link>
             <span className="badge badge-secondary badge-sm hidden sm:inline-flex">
@@ -46,11 +52,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </div>
 
           <div className="flex items-center gap-2">
-            <Link href="/atelier" className="btn btn-ghost btn-sm hidden sm:inline-flex">
-              Mon atelier
+            <Link href={localePath(locale, "/atelier")} className="btn btn-ghost btn-sm hidden sm:inline-flex">
+              {copy.nav.workshop}
             </Link>
+            <LanguageSwitcher locale={locale} label={copy.nav.chooseLanguage} />
             <ThemeToggle />
-            <UserMenu name={user.fullName} role="staff" />
+            <UserMenu name={user.fullName} role="staff" locale={locale} />
           </div>
         </div>
       </header>

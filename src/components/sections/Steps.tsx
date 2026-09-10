@@ -3,14 +3,19 @@ import Reveal from "@/components/ui/Reveal";
 import SectionHeading from "@/components/ui/SectionHeading";
 import { accentAt } from "@/lib/accents";
 import { steps } from "@/lib/site";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 
-export default function Steps() {
+export default async function Steps() {
+  const locale = await getLocale();
+  const copy = getMessages(locale).home;
   return (
     <section id="prise-en-main" className="bg-base-200 py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <SectionHeading
-          title="Démarrer prend quelques minutes"
-          subtitle="Pas de paramétrage long avant de pouvoir enregistrer une première commande."
+          title={copy.stepsTitle}
+          subtitle={copy.stepsSubtitle}
         />
 
         <ol className="relative grid gap-12 md:grid-cols-4">
@@ -25,9 +30,9 @@ export default function Steps() {
                 <span className="font-display bg-base-100 relative z-10 mx-auto grid h-16 w-16 place-items-center rounded-full text-lg font-extrabold text-[color:var(--accent)] shadow-lg ring-2 ring-[color-mix(in_oklab,var(--accent)_45%,transparent)]">
                   {step.step}
                 </span>
-                <h3 className="font-display mt-5 text-lg font-bold">{step.title}</h3>
+                <h3 className="font-display mt-5 text-lg font-bold">{copy.steps[index][0]}</h3>
                 <p className="text-base-content/65 mx-auto mt-2 max-w-xs text-sm leading-relaxed text-pretty">
-                  {step.text}
+                  {copy.steps[index][1]}
                 </p>
               </Reveal>
             </li>
@@ -37,8 +42,8 @@ export default function Steps() {
         {/* The anchored section stays a summary; the full tutorial library
             required by §6.1 lives on its own page. */}
         <Reveal className="mt-16 text-center">
-          <Link href="/prise-en-main" className="btn btn-outline btn-lg">
-            Voir tous les tutoriels
+          <Link href={localePath(locale, "/prise-en-main")} className="btn btn-outline btn-lg">
+            {copy.start}
           </Link>
         </Reveal>
       </div>

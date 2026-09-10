@@ -5,25 +5,30 @@ import SectionHeading from "@/components/ui/SectionHeading";
 import { formatMoney, money, type CurrencyCode } from "@/lib/money";
 import { listActivePlans, parseLimits } from "@/lib/repos/contents";
 import { COUNTRIES, type CountryCode } from "@/lib/phone";
-import { includedFeatures, pricingNote } from "@/lib/site";
+import { includedFeatures } from "@/lib/site";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 
 /**
  * §6.2 / §11.1: the displayed price, period and limits must match the offer
  * actually granted at signup — so they are read from the same `plans` table
  * the subscription references, never hard-coded in the page.
  */
-export default function Pricing() {
+export default async function Pricing() {
+  const locale = await getLocale();
+  const copy = getMessages(locale).pricing;
   const plans = listActivePlans();
 
   return (
     <section id="tarifs" className="bg-base-100 py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <SectionHeading title="Un tarif simple" subtitle={pricingNote} />
+        <SectionHeading title={copy.title} subtitle={copy.note} />
 
         {plans.length === 0 ? (
           <Reveal className="mx-auto max-w-xl text-center">
             <p className="alert alert-info justify-center text-sm">
-              Aucune offre n&apos;est publiée pour le moment.
+              {copy.empty}
             </p>
           </Reveal>
         ) : (
@@ -47,12 +52,12 @@ export default function Pricing() {
                         {formatMoney(price)}
                       </span>
                       <span className="text-base-content/55 text-sm">
-                        / {plan.period_months === 1 ? "mois" : `${plan.period_months} mois`}
+                        / {plan.period_months === 1 ? copy.month : `${plan.period_months} ${copy.month}`}
                       </span>
                     </p>
 
                     <p className="text-base-content/50 mt-1 text-xs">
-                      Par atelier. Renouvellement mensuel, résiliable à tout moment.
+                      {copy.terms}
                     </p>
 
                     <ul className="mt-6 space-y-2.5">
@@ -69,19 +74,19 @@ export default function Pricing() {
                     {/* §11.1: never advertise "illimité" before the limits are settled. */}
                     <dl className="border-base-300 mt-6 space-y-1.5 border-t pt-5 text-sm">
                       <div className="flex justify-between">
-                        <dt className="text-base-content/55">Membres inclus</dt>
-                        <dd className="font-medium">{limits.members ?? "À définir"}</dd>
+                        <dt className="text-base-content/55">{copy.members}</dt>
+                        <dd className="font-medium">{limits.members ?? copy.pending}</dd>
                       </div>
                       <div className="flex justify-between">
-                        <dt className="text-base-content/55">Stockage photos</dt>
+                        <dt className="text-base-content/55">{copy.storage}</dt>
                         <dd className="font-medium">
-                          {limits.storageMb ? `${limits.storageMb} Mo` : "À définir"}
+                          {limits.storageMb ? `${limits.storageMb} Mo` : copy.pending}
                         </dd>
                       </div>
                     </dl>
 
-                    <Link href="/inscription" className="btn btn-primary mt-7 w-full">
-                      Commencer l&apos;essai de 14 jours
+                    <Link href={localePath(locale, "/inscription")} className="btn btn-primary mt-7 w-full">
+                      {copy.trial}
                     </Link>
                   </article>
                 </Reveal>
