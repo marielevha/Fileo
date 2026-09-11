@@ -2,8 +2,21 @@ import "server-only";
 
 import { recordAudit } from "@/lib/audit";
 import { collection, newId, nowIso, withTransaction } from "@/lib/db";
-import { money, type CurrencyCode, type Money } from "@/lib/money";
-import { getOrderBalance } from "./orders";
+import {
+  computeOrderBalance,
+  money,
+  multiply,
+  type CurrencyCode,
+  type Money,
+} from "@/lib/money";
+import {
+  deriveOrderState,
+  getOrderBalance,
+  isOrderLate,
+  type OrderItemRow,
+  type OrderRow,
+  type OrderState,
+} from "./orders";
 
 export type MovementKind = "payment" | "refund" | "correction";
 export type MovementMethod = "cash" | "mobile_money" | "transfer" | "other";
@@ -162,6 +175,205 @@ export async function listRecentMovements(workshopId: string, limit = 50) {
     { $set: { reference_label: "$order.reference", client_name: "$client.display_name" } },
     { $project: { _id: 0, order: 0, client: 0 } },
   ]).toArray();
+}
+
+export type PaymentOrderFilter =
+  | "all"
+  | "a_encaisser"
+  | "acompte"
+  | "payes"
+  | "sans_paiement"
+  | "retard"
+  | "trop_percu";
+
+export type PaymentOrderRow = {
+  order: OrderRow;
+  state: OrderState;
+  orderTotal: Money;
+  netCollected: Money;
+  remainingDue: Money;
+  overpayment: Money;
+  lastPaymentDate: string | null;
+  movementCount: number;
+  isLate: boolean;
+};
+
+export type PaymentOrderStats = {
+  totalOrders: number;
+  ordersWithRemainingDue: number;
+  paidOrders: number;
+  overdueOrders: number;
+  overpaidOrders: number;
+  totalRemainingDue: Money;
+  totalCollected: Money;
+  todayCollected: Money;
+};
+
+export type PaymentOrderPage = {
+  items: PaymentOrderRow[];
+  stats: PaymentOrderStats;
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+};
+
+type RawPaymentOrder = OrderRow & {
+  items: OrderItemRow[];
+  movements: Array<{
+    kind: string;
+    amount: number;
+    status: string;
+    effective_date: string;
+  }>;
+  client_name: string;
+};
+
+export async function listPaymentOrders(
+  workshopId: string,
+  options: {
+    search?: string;
+    filter?: PaymentOrderFilter;
+    page?: number;
+    pageSize?: number;
+    today?: string;
+    currency: CurrencyCode;
+  },
+): Promise<PaymentOrderPage> {
+  const orders = await collection("orders");
+  const search = options.search?.trim().toLowerCase() ?? "";
+  const today = options.today ?? nowIso().slice(0, 10);
+  const pageSize = Math.min(50, Math.max(1, Math.trunc(options.pageSize ?? 10)));
+
+  const rawRows = await orders.aggregate<RawPaymentOrder>([
+    { $match: { workshop_id: workshopId } },
+    { $lookup: { from: "clients", localField: "client_id", foreignField: "id", as: "client" } },
+    { $unwind: { path: "$client", preserveNullAndEmptyArrays: true } },
+    { $lookup: { from: "order_items", localField: "id", foreignField: "order_id", as: "items" } },
+    { $lookup: { from: "financial_movements", localField: "id", foreignField: "order_id", as: "movements" } },
+    { $set: { client_name: { $ifNull: ["$client.display_name", "Client supprimé"] } } },
+    { $project: { _id: 0, client: 0 } },
+    { $sort: { created_at: -1, id: -1 } },
+  ]).toArray();
+
+  const rows = rawRows
+    .map((row) => buildPaymentOrderRow(row, options.currency, today))
+    .filter((row) => matchesPaymentSearch(row, search))
+    .filter((row) => matchesPaymentFilter(row, options.filter ?? "all"));
+
+  const statsRows = rawRows.map((row) => buildPaymentOrderRow(row, options.currency, today));
+  const stats = buildPaymentStats(statsRows, rawRows, options.currency, today);
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const page = Math.min(pageCount, Math.max(1, Math.trunc(options.page ?? 1)));
+
+  return {
+    items: rows.slice((page - 1) * pageSize, page * pageSize),
+    stats,
+    total: rows.length,
+    page,
+    pageSize,
+    pageCount,
+  };
+}
+
+function buildPaymentOrderRow(row: RawPaymentOrder, currency: CurrencyCode, today: string): PaymentOrderRow {
+  const items = row.items;
+  const confirmed = row.movements.filter((movement) => movement.status === "confirmed");
+  const balance = computeOrderBalance({
+    currency,
+    lineTotals: items
+      .filter((item) => item.status !== "annule")
+      .map((item) => multiply(money(Number(item.unit_price_amount), currency), Number(item.quantity))),
+    discount: money(Number(row.discount_amount ?? 0), currency),
+    confirmedPayments: confirmed
+      .filter((movement) => movement.kind === "payment")
+      .map((movement) => money(Number(movement.amount), currency)),
+    confirmedRefunds: confirmed
+      .filter((movement) => movement.kind === "refund")
+      .map((movement) => money(Number(movement.amount), currency)),
+  });
+  const order: OrderRow = {
+    id: row.id,
+    workshop_id: row.workshop_id,
+    client_id: row.client_id,
+    client_name: row.client_name,
+    reference: row.reference,
+    currency: row.currency,
+    discount_amount: Number(row.discount_amount ?? 0),
+    discount_reason: row.discount_reason ?? null,
+    instructions: row.instructions ?? null,
+    promised_date: row.promised_date ?? null,
+    fitting_date: row.fitting_date ?? null,
+    cancelled_at: row.cancelled_at ?? null,
+    created_at: row.created_at,
+  };
+  const paymentDates = confirmed
+    .filter((movement) => movement.kind === "payment")
+    .map((movement) => movement.effective_date)
+    .sort((a, b) => b.localeCompare(a));
+
+  return {
+    order,
+    state: deriveOrderState(order, items),
+    orderTotal: balance.orderTotal,
+    netCollected: balance.netCollected,
+    remainingDue: balance.remainingDue,
+    overpayment: balance.overpayment,
+    lastPaymentDate: paymentDates[0] ?? null,
+    movementCount: row.movements.filter((movement) => movement.kind !== "correction").length,
+    isLate: balance.remainingDue.amount > 0 && isOrderLate(order, items, new Date(`${today}T12:00:00Z`)),
+  };
+}
+
+function matchesPaymentSearch(row: PaymentOrderRow, search: string): boolean {
+  if (!search) return true;
+  return `${row.order.reference} ${row.order.client_name}`.toLowerCase().includes(search);
+}
+
+function matchesPaymentFilter(row: PaymentOrderRow, filter: PaymentOrderFilter): boolean {
+  if (filter === "a_encaisser") return row.remainingDue.amount > 0;
+  if (filter === "acompte") return row.netCollected.amount > 0 && row.remainingDue.amount > 0;
+  if (filter === "payes") return row.remainingDue.amount === 0 && row.overpayment.amount === 0;
+  if (filter === "sans_paiement") return row.netCollected.amount === 0;
+  if (filter === "retard") return row.isLate;
+  if (filter === "trop_percu") return row.overpayment.amount > 0;
+  return true;
+}
+
+function buildPaymentStats(
+  rows: PaymentOrderRow[],
+  rawRows: RawPaymentOrder[],
+  currency: CurrencyCode,
+  today: string,
+): PaymentOrderStats {
+  const todayCollected = rawRows.reduce((total, row) => {
+    return total + row.movements.reduce((subtotal, movement) => {
+      if (movement.status !== "confirmed" || movement.effective_date !== today) return subtotal;
+      if (movement.kind === "payment") return subtotal + Number(movement.amount);
+      if (movement.kind === "refund") return subtotal - Number(movement.amount);
+      return subtotal;
+    }, 0);
+  }, 0);
+
+  return rows.reduce<PaymentOrderStats>((stats, row) => {
+    stats.totalOrders += 1;
+    stats.ordersWithRemainingDue += row.remainingDue.amount > 0 ? 1 : 0;
+    stats.paidOrders += row.remainingDue.amount === 0 && row.overpayment.amount === 0 ? 1 : 0;
+    stats.overdueOrders += row.isLate ? 1 : 0;
+    stats.overpaidOrders += row.overpayment.amount > 0 ? 1 : 0;
+    stats.totalRemainingDue.amount += row.remainingDue.amount;
+    stats.totalCollected.amount += row.netCollected.amount;
+    return stats;
+  }, {
+    totalOrders: 0,
+    ordersWithRemainingDue: 0,
+    paidOrders: 0,
+    overdueOrders: 0,
+    overpaidOrders: 0,
+    totalRemainingDue: money(0, currency),
+    totalCollected: money(0, currency),
+    todayCollected: money(todayCollected, currency),
+  });
 }
 
 export async function collectedBetween(

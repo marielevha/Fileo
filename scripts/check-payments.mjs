@@ -80,6 +80,16 @@ try {
   );
   check("connexion responsable", loginResponse.status === 303);
 
+  const paymentsList = await get("/fr/atelier/paiements");
+  check("liste des paiements accessible", paymentsList.response.status === 200);
+  check(
+    "synthese des soldes visible",
+    paymentsList.html.includes("Reste") && paymentsList.html.includes("Encaisser"),
+  );
+
+  const filteredList = await get("/fr/atelier/paiements?filtre=a_encaisser");
+  check("filtre a encaisser accessible", filteredList.response.status === 200);
+
   const path = `/fr/atelier/commandes/${order.id}/encaissement`;
   const paymentPage = await get(path);
   check("formulaire accessible", paymentPage.response.status === 200);
