@@ -16,7 +16,7 @@ import { localePath } from "@/lib/i18n/config";
 export default async function Pricing() {
   const locale = await getLocale();
   const copy = getMessages(locale).pricing;
-  const plans = listActivePlans();
+  const plans = await listActivePlans();
 
   return (
     <section id="tarifs" className="bg-base-100 py-24">

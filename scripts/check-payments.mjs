@@ -1,8 +1,6 @@
-import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
+import { closeMongo, mongoDb as db } from "./mongodb.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const db = new DatabaseSync(join(process.cwd(), "data", "fileo.db"));
 const cookies = new Map();
 let movementId = null;
 
@@ -68,13 +66,10 @@ function check(label, condition) {
 try {
   console.log("\nEncaissements - ecriture et idempotence\n");
 
-  const order = db.prepare(`
-    SELECT id, workshop_id, currency
-      FROM orders
-     WHERE cancelled_at IS NULL
-     ORDER BY created_at
-     LIMIT 1
-  `).get();
+  const order = await db.collection("orders").findOne(
+    { cancelled_at: null },
+    { sort: { created_at: 1 }, projection: { id: 1, workshop_id: 1, currency: 1 } },
+  );
   if (!order) throw new Error("Aucune commande active disponible pour le test.");
 
   const loginPage = await get("/fr/connexion");
@@ -104,11 +99,10 @@ try {
       response.headers.get("location") === `/fr/atelier/commandes/${order.id}?encaissement=ok`,
   );
 
-  const movement = db.prepare(`
-    SELECT id, amount, currency, method, status
-      FROM financial_movements
-     WHERE workshop_id = ? AND order_id = ? AND reference = ?
-  `).get(order.workshop_id, order.id, reference);
+  const movement = await db.collection("financial_movements").findOne(
+    { workshop_id: order.workshop_id, order_id: order.id, reference },
+    { projection: { id: 1, amount: 1, currency: 1, method: 1, status: 1 } },
+  );
   movementId = movement?.id ?? null;
   check(
     "mouvement confirme persiste",
@@ -117,18 +111,14 @@ try {
   );
   check(
     "ecriture inscrite dans l'audit",
-    Boolean(db.prepare(
-      "SELECT id FROM audit_log WHERE entity_kind = 'financial_movement' AND entity_id = ? AND action = 'payment.record'",
-    ).get(movementId)),
+    Boolean(await db.collection("audit_log").findOne({ entity_kind: "financial_movement", entity_id: movementId, action: "payment.record" })),
   );
 
   const replay = await submit(path, form, values);
   check("renvoi idempotent accepte", replay.status === 303);
   check(
     "renvoi ne duplique pas l'encaissement",
-    db.prepare(
-      "SELECT COUNT(*) AS total FROM financial_movements WHERE workshop_id = ? AND reference = ?",
-    ).get(order.workshop_id, reference).total === 1,
+    await db.collection("financial_movements").countDocuments({ workshop_id: order.workshop_id, reference }) === 1,
   );
 
   const detail = await get(`/fr/atelier/commandes/${order.id}?encaissement=ok`);
@@ -138,8 +128,8 @@ try {
   console.log("\nTout est conforme.\n");
 } finally {
   if (movementId) {
-    db.prepare("DELETE FROM audit_log WHERE entity_kind = 'financial_movement' AND entity_id = ?").run(movementId);
-    db.prepare("DELETE FROM financial_movements WHERE id = ?").run(movementId);
+    await db.collection("audit_log").deleteMany({ entity_kind: "financial_movement", entity_id: movementId });
+    await db.collection("financial_movements").deleteOne({ id: movementId });
   }
-  db.close();
+  await closeMongo();
 }

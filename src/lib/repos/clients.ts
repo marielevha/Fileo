@@ -1,7 +1,7 @@
 import "server-only";
 
-import { execute, newId, nowIso, query, queryOne } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
+import { collection, newId, nowIso } from "@/lib/db";
 import { normaliseDigits } from "@/lib/phone";
 
 export type ClientRow = {
@@ -35,15 +35,11 @@ export type ClientPage = {
   pageCount: number;
 };
 
-const SORT_SQL: Record<ClientSort, string> = {
-  name: "c.display_name COLLATE NOCASE",
-  phone: "c.phone_search",
-  orders: "order_count",
-  lastOrder: "last_order_at",
-  createdAt: "c.created_at",
-};
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-export function listClients(
+export async function listClients(
   workshopId: string,
   options: {
     search?: string;
@@ -53,54 +49,68 @@ export function listClients(
     sort?: ClientSort;
     direction?: SortDirection;
   } = {},
-): ClientPage {
+): Promise<ClientPage> {
+  const clients = await collection("clients");
   const term = options.search?.trim() ?? "";
   const digits = normaliseDigits(term);
   const pageSize = Math.min(100, Math.max(10, options.pageSize ?? 20));
   const requestedPage = Math.max(1, options.page ?? 1);
-  const sort = options.sort && options.sort in SORT_SQL ? options.sort : "name";
-  const direction = options.direction === "desc" ? "DESC" : "ASC";
-  const filters = `c.workshop_id = ?
-        AND c.deleted_at IS NULL
-        AND (? = 1 OR c.archived_at IS NULL)
-        AND (
-          ? = ''
-          OR LOWER(c.display_name) LIKE '%' || LOWER(?) || '%'
-          OR (? <> '' AND c.phone_search LIKE '%' || ? || '%')
-        )`;
-  const filterParams = [
-    workshopId,
-    options.includeArchived ? 1 : 0,
-    term,
-    term,
-    digits,
-    digits,
-  ];
+  const filter: Record<string, unknown> = {
+    workshop_id: workshopId,
+    deleted_at: null,
+  };
+  if (!options.includeArchived) filter.archived_at = null;
+  if (term) {
+    const choices: Record<string, unknown>[] = [
+      { display_name: { $regex: escapeRegex(term), $options: "i" } },
+    ];
+    if (digits) choices.push({ phone_search: { $regex: escapeRegex(digits) } });
+    filter.$or = choices;
+  }
 
-  const total = queryOne<{ total: number }>(
-    `SELECT COUNT(*) AS total FROM clients c WHERE ${filters}`,
-    filterParams,
-  )?.total ?? 0;
+  const total = await clients.countDocuments(filter);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(requestedPage, pageCount);
-  const items = query<ClientListItem>(
-    `SELECT c.*,
-            (SELECT COUNT(*) FROM orders o WHERE o.client_id = c.id) AS order_count,
-            (SELECT MAX(o.created_at) FROM orders o WHERE o.client_id = c.id) AS last_order_at
-       FROM clients c
-      WHERE ${filters}
-      ORDER BY ${SORT_SQL[sort]} ${direction}, c.id ASC
-      LIMIT ? OFFSET ?`,
-    [...filterParams, pageSize, (page - 1) * pageSize],
-  );
+  const sortField = {
+    name: "display_name",
+    phone: "phone_search",
+    orders: "order_count",
+    lastOrder: "last_order_at",
+    createdAt: "created_at",
+  }[options.sort ?? "name"] ?? "display_name";
+  const direction = options.direction === "desc" ? -1 : 1;
+
+  const items = await clients.aggregate<ClientListItem>([
+    { $match: filter },
+    {
+      $lookup: {
+        from: "orders",
+        localField: "id",
+        foreignField: "client_id",
+        as: "client_orders",
+      },
+    },
+    {
+      $set: {
+        order_count: { $size: "$client_orders" },
+        last_order_at: { $max: "$client_orders.created_at" },
+      },
+    },
+    { $unset: ["_id", "client_orders"] },
+    { $sort: { [sortField]: direction, id: 1 } },
+    { $skip: (page - 1) * pageSize },
+    { $limit: pageSize },
+  ], { collation: { locale: "fr", strength: 1 } }).toArray();
+
   return { items, total, page, pageSize, pageCount };
 }
 
-export function getClient(workshopId: string, clientId: string): ClientRow | null {
-  return queryOne<ClientRow>(
-    `SELECT * FROM clients WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
-    [workshopId, clientId],
-  );
+export async function getClient(workshopId: string, clientId: string): Promise<ClientRow | null> {
+  const clients = await collection("clients");
+  return clients.findOne(
+    { workshop_id: workshopId, id: clientId, deleted_at: null },
+    { projection: { _id: 0 } },
+  ) as Promise<ClientRow | null>;
 }
 
 export type CreateClientInput = {
@@ -114,22 +124,28 @@ export type CreateClientInput = {
   notes?: string | null;
 };
 
-export function createClient(input: CreateClientInput): string {
+export async function createClient(input: CreateClientInput): Promise<string> {
   const id = newId();
-  execute(
-    `INSERT INTO clients
-       (id, workshop_id, display_name, phone_e164, phone_search, other_contact,
-        guardian_name, guardian_phone, notes, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id, input.workshopId, input.displayName.trim(), input.phoneE164 ?? null,
-      input.phoneE164 ? normaliseDigits(input.phoneE164) : null,
-      input.otherContact ?? null, input.guardianName ?? null,
-      input.guardianPhone ?? null, input.notes ?? null, input.actorUserId,
-      nowIso(), nowIso(),
-    ],
-  );
-  recordAudit({
+  const timestamp = nowIso();
+  const clients = await collection("clients");
+  await clients.insertOne({
+    id,
+    workshop_id: input.workshopId,
+    display_name: input.displayName.trim(),
+    phone_e164: input.phoneE164 ?? null,
+    phone_search: input.phoneE164 ? normaliseDigits(input.phoneE164) : null,
+    other_contact: input.otherContact ?? null,
+    guardian_name: input.guardianName ?? null,
+    guardian_phone: input.guardianPhone ?? null,
+    notes: input.notes ?? null,
+    archived_at: null,
+    deleted_at: null,
+    created_by: input.actorUserId,
+    created_at: timestamp,
+    updated_at: timestamp,
+    row_version: 1,
+  });
+  await recordAudit({
     workshopId: input.workshopId,
     actorUserId: input.actorUserId,
     action: "client.create",
@@ -142,25 +158,28 @@ export function createClient(input: CreateClientInput): string {
 
 export type UpdateClientInput = CreateClientInput & { clientId: string };
 
-export function updateClient(input: UpdateClientInput): boolean {
-  const before = getClient(input.workshopId, input.clientId);
+export async function updateClient(input: UpdateClientInput): Promise<boolean> {
+  const before = await getClient(input.workshopId, input.clientId);
   if (!before) return false;
-  const result = execute(
-    `UPDATE clients
-        SET display_name = ?, phone_e164 = ?, phone_search = ?, other_contact = ?,
-            guardian_name = ?, guardian_phone = ?, notes = ?, updated_at = ?,
-            row_version = row_version + 1
-      WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
-    [
-      input.displayName.trim(), input.phoneE164 ?? null,
-      input.phoneE164 ? normaliseDigits(input.phoneE164) : null,
-      input.otherContact ?? null, input.guardianName ?? null,
-      input.guardianPhone ?? null, input.notes ?? null, nowIso(),
-      input.workshopId, input.clientId,
-    ],
+  const clients = await collection("clients");
+  const result = await clients.updateOne(
+    { workshop_id: input.workshopId, id: input.clientId, deleted_at: null },
+    {
+      $set: {
+        display_name: input.displayName.trim(),
+        phone_e164: input.phoneE164 ?? null,
+        phone_search: input.phoneE164 ? normaliseDigits(input.phoneE164) : null,
+        other_contact: input.otherContact ?? null,
+        guardian_name: input.guardianName ?? null,
+        guardian_phone: input.guardianPhone ?? null,
+        notes: input.notes ?? null,
+        updated_at: nowIso(),
+      },
+      $inc: { row_version: 1 },
+    },
   );
-  if (Number(result.changes) === 0) return false;
-  recordAudit({
+  if (result.modifiedCount === 0) return false;
+  await recordAudit({
     workshopId: input.workshopId,
     actorUserId: input.actorUserId,
     action: "client.update",
@@ -172,20 +191,19 @@ export function updateClient(input: UpdateClientInput): boolean {
   return true;
 }
 
-export function softDeleteClient(params: {
+export async function softDeleteClient(params: {
   workshopId: string;
   clientId: string;
   actorUserId: string;
-}): boolean {
+}): Promise<boolean> {
   const timestamp = nowIso();
-  const result = execute(
-    `UPDATE clients
-        SET deleted_at = ?, updated_at = ?, row_version = row_version + 1
-      WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
-    [timestamp, timestamp, params.workshopId, params.clientId],
+  const clients = await collection("clients");
+  const result = await clients.updateOne(
+    { workshop_id: params.workshopId, id: params.clientId, deleted_at: null },
+    { $set: { deleted_at: timestamp, updated_at: timestamp }, $inc: { row_version: 1 } },
   );
-  if (Number(result.changes) === 0) return false;
-  recordAudit({
+  if (result.modifiedCount === 0) return false;
+  await recordAudit({
     workshopId: params.workshopId,
     actorUserId: params.actorUserId,
     action: "client.delete",
@@ -195,35 +213,37 @@ export function softDeleteClient(params: {
   return true;
 }
 
-export function findPossibleDuplicates(
+export async function findPossibleDuplicates(
   workshopId: string,
   phoneE164: string,
   excludeId?: string,
-): ClientRow[] {
+): Promise<ClientRow[]> {
   const digits = normaliseDigits(phoneE164);
   if (!digits) return [];
-  return query<ClientRow>(
-    `SELECT * FROM clients
-      WHERE workshop_id = ? AND phone_search = ? AND deleted_at IS NULL
-        AND (? IS NULL OR id <> ?)
-      LIMIT 5`,
-    [workshopId, digits, excludeId ?? null, excludeId ?? null],
-  );
+  const clients = await collection("clients");
+  return clients.find({
+    workshop_id: workshopId,
+    phone_search: digits,
+    deleted_at: null,
+    ...(excludeId ? { id: { $ne: excludeId } } : {}),
+  }, { projection: { _id: 0 } }).limit(5).toArray() as unknown as Promise<ClientRow[]>;
 }
 
-export function archiveClient(params: {
+export async function archiveClient(params: {
   workshopId: string;
   clientId: string;
   actorUserId: string;
   archived: boolean;
-}): void {
-  execute(
-    `UPDATE clients
-        SET archived_at = ?, updated_at = ?, row_version = row_version + 1
-      WHERE workshop_id = ? AND id = ? AND deleted_at IS NULL`,
-    [params.archived ? nowIso() : null, nowIso(), params.workshopId, params.clientId],
+}): Promise<void> {
+  const clients = await collection("clients");
+  await clients.updateOne(
+    { workshop_id: params.workshopId, id: params.clientId, deleted_at: null },
+    {
+      $set: { archived_at: params.archived ? nowIso() : null, updated_at: nowIso() },
+      $inc: { row_version: 1 },
+    },
   );
-  recordAudit({
+  await recordAudit({
     workshopId: params.workshopId,
     actorUserId: params.actorUserId,
     action: "client.archive",
@@ -245,29 +265,27 @@ export type MeasurementRow = {
   created_at: string;
 };
 
-export function listMeasurements(workshopId: string, clientId: string): MeasurementRow[] {
-  return query<MeasurementRow>(
-    `SELECT * FROM measurement_records
-      WHERE workshop_id = ? AND client_id = ?
-      ORDER BY category, version DESC`,
-    [workshopId, clientId],
-  );
+export async function listMeasurements(workshopId: string, clientId: string): Promise<MeasurementRow[]> {
+  const measurements = await collection("measurement_records");
+  return measurements.find(
+    { workshop_id: workshopId, client_id: clientId },
+    { projection: { _id: 0 } },
+  ).sort({ category: 1, version: -1 }).toArray() as unknown as Promise<MeasurementRow[]>;
 }
 
-export function latestMeasurements(workshopId: string, clientId: string): MeasurementRow[] {
-  return query<MeasurementRow>(
-    `SELECT m.* FROM measurement_records m
-      WHERE m.workshop_id = ? AND m.client_id = ?
-        AND m.version = (
-          SELECT MAX(m2.version) FROM measurement_records m2
-           WHERE m2.client_id = m.client_id AND m2.category = m.category
-        )
-      ORDER BY m.category`,
-    [workshopId, clientId],
-  );
+export async function latestMeasurements(workshopId: string, clientId: string): Promise<MeasurementRow[]> {
+  const measurements = await collection("measurement_records");
+  return measurements.aggregate<MeasurementRow>([
+    { $match: { workshop_id: workshopId, client_id: clientId } },
+    { $sort: { category: 1, version: -1 } },
+    { $group: { _id: "$category", row: { $first: "$$ROOT" } } },
+    { $replaceWith: "$row" },
+    { $unset: "_id" },
+    { $sort: { category: 1 } },
+  ]).toArray();
 }
 
-export function addMeasurementVersion(params: {
+export async function addMeasurementVersion(params: {
   workshopId: string;
   clientId: string;
   actorUserId: string;
@@ -275,26 +293,29 @@ export function addMeasurementVersion(params: {
   values: Record<string, number | null>;
   notes?: string | null;
   takenAt?: string;
-}): string {
-  const previous = queryOne<{ max_version: number | null }>(
-    `SELECT MAX(version) AS max_version FROM measurement_records
-      WHERE client_id = ? AND category = ?`,
-    [params.clientId, params.category],
+}): Promise<string> {
+  const measurements = await collection("measurement_records");
+  const previous = await measurements.findOne(
+    { workshop_id: params.workshopId, client_id: params.clientId, category: params.category },
+    { sort: { version: -1 }, projection: { version: 1 } },
   );
   const id = newId();
-  const version = (previous?.max_version ?? 0) + 1;
-  execute(
-    `INSERT INTO measurement_records
-       (id, workshop_id, client_id, category, version, values_json, unit,
-        notes, taken_at, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'cm', ?, ?, ?, ?)`,
-    [
-      id, params.workshopId, params.clientId, params.category, version,
-      JSON.stringify(params.values), params.notes ?? null,
-      params.takenAt ?? nowIso().slice(0, 10), params.actorUserId, nowIso(),
-    ],
-  );
-  recordAudit({
+  const version = Number(previous?.version ?? 0) + 1;
+  await measurements.insertOne({
+    id,
+    workshop_id: params.workshopId,
+    client_id: params.clientId,
+    template_id: null,
+    category: params.category,
+    version,
+    values_json: JSON.stringify(params.values),
+    unit: "cm",
+    notes: params.notes ?? null,
+    taken_at: params.takenAt ?? nowIso().slice(0, 10),
+    created_by: params.actorUserId,
+    created_at: nowIso(),
+  });
+  await recordAudit({
     workshopId: params.workshopId,
     actorUserId: params.actorUserId,
     action: "measurement.create",

@@ -7,31 +7,22 @@
  * qu'aucun montant n'est transmis à un collaborateur sans droit financier.
  */
 
-import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { closeMongo, mongoDb as db } from "./mongodb.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const db = new DatabaseSync(join(process.cwd(), "data", "fileo.db"));
+const sessionHashes = [];
 
-function mintSession(phone) {
-  const user = db.prepare("SELECT id FROM users WHERE phone_e164 = ?").get(phone);
+async function mintSession(phone) {
+  const user = await db.collection("users").findOne({ phone_e164: phone }, { projection: { id: 1 } });
   if (!user) throw new Error(`Utilisateur inconnu: ${phone}`);
 
   const token = randomBytes(32).toString("base64url");
   const now = new Date().toISOString();
 
-  db.prepare(
-    `INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    randomUUID(),
-    user.id,
-    createHash("sha256").update(token).digest("hex"),
-    now,
-    now,
-    new Date(Date.now() + 86_400_000).toISOString(),
-  );
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  sessionHashes.push(tokenHash);
+  await db.collection("sessions").insertOne({ id: randomUUID(), user_id: user.id, token_hash: tokenHash, workshop_id: null, user_agent: "check:smoke", created_at: now, last_seen_at: now, expires_at: new Date(Date.now() + 86_400_000).toISOString(), revoked_at: null });
 
   return token;
 }
@@ -57,15 +48,11 @@ function report(label, actual, expected) {
   console.log(`  ${ok ? "ok  " : "FAIL"} ${label.padEnd(46)} ${actual}${ok ? "" : `  (attendu ${expected})`}`);
 }
 
-const owner = mintSession("+242061111111");
-const collaborator = mintSession("+242062222222");
-const staff = mintSession("+242060000001");
-const sampleClient = db.prepare(
-  "SELECT id, display_name FROM clients WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1",
-).get();
-const sampleOrder = db.prepare(
-  "SELECT id, reference FROM orders ORDER BY created_at LIMIT 1",
-).get();
+const owner = await mintSession("+242061111111");
+const collaborator = await mintSession("+242062222222");
+const staff = await mintSession("+242060000001");
+const sampleClient = await db.collection("clients").findOne({ deleted_at: null }, { sort: { created_at: 1 }, projection: { id: 1, display_name: 1 } });
+const sampleOrder = await db.collection("orders").findOne({}, { sort: { created_at: 1 }, projection: { id: 1, reference: 1 } });
 
 console.log("\nPages publiques\n");
 for (const path of ["/fr", "/en", "/lg", "/fr/connexion", "/fr/inscription", "/fr/mentions-legales", "/fr/cgv"]) {
@@ -178,5 +165,6 @@ for (const path of ["/fr/admin", "/fr/admin/ateliers", "/fr/admin/reglements"]) 
 }
 
 console.log(`\n${failures === 0 ? "Tout est conforme." : `${failures} échec(s).`}\n`);
-db.close();
+await db.collection("sessions").deleteMany({ token_hash: { $in: sessionHashes } });
+await closeMongo();
 process.exit(failures === 0 ? 0 : 1);

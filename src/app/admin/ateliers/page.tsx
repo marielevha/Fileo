@@ -26,7 +26,7 @@ export default async function AdminWorkshopsPage({
   await requireAdmin("admin.workshops");
 
   const { q = "" } = await searchParams;
-  const workshops = listWorkshops(q);
+  const workshops = await listWorkshops(q);
 
   return (
     <>

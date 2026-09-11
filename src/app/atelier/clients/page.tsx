@@ -33,7 +33,7 @@ export default async function ClientsPage({ searchParams }: Props) {
   const sort = sorts.includes(params.sort as ClientSort) ? (params.sort as ClientSort) : "name";
   const direction: SortDirection = params.dir === "desc" ? "desc" : "asc";
   const pageSize = [10, 20, 50].includes(Number(params.taille)) ? Number(params.taille) : 20;
-  const result = listClients(workshop.id, {
+  const result = await listClients(workshop.id, {
     search,
     includeArchived,
     sort,

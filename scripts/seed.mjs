@@ -9,19 +9,17 @@
  * clearly labelled, per §5.1.
  */
 
-import { DatabaseSync } from "node:sqlite";
+import { MongoClient } from "mongodb";
 import { randomUUID, randomBytes, scryptSync } from "node:crypto";
-import { readFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
 
-const DB_PATH = process.env.FILEO_DB_PATH ?? join(process.cwd(), "data", "fileo.db");
-const SCHEMA_PATH = join(process.cwd(), "src", "lib", "db", "schema.sql");
-
-mkdirSync(dirname(DB_PATH), { recursive: true });
-
-const db = new DatabaseSync(DB_PATH);
-db.exec("PRAGMA foreign_keys = ON;");
-db.exec(readFileSync(SCHEMA_PATH, "utf8"));
+if (!process.env.MONGODB_URI) process.loadEnvFile("atlas-credentials.env");
+if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI est absent.");
+const mongo = new MongoClient(process.env.MONGODB_URI);
+await mongo.connect();
+const databaseName = process.env.MONGODB_DB ?? "fileo";
+const db = mongo.db(databaseName);
+await db.dropDatabase();
+const writes = [];
 
 const now = () => new Date().toISOString();
 const day = (offset = 0) => {
@@ -38,14 +36,10 @@ function hashPassword(password) {
 }
 
 function insert(table, row) {
-  const keys = Object.keys(row);
-  const placeholders = keys.map(() => "?").join(", ");
-  db.prepare(
-    `INSERT OR IGNORE INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`,
-  ).run(...keys.map((k) => row[k]));
+  writes.push(db.collection(table).insertOne(row));
 }
 
-console.log(`Base : ${DB_PATH}`);
+console.log(`Base MongoDB : ${databaseName}`);
 
 // --- Comptes -----------------------------------------------------
 const adminId = randomUUID();
@@ -379,6 +373,20 @@ for (const content of contents) {
   });
 }
 
+await Promise.all(writes);
+
+await Promise.all([
+  db.collection("users").createIndex({ id: 1 }, { unique: true }),
+  db.collection("users").createIndex({ phone_e164: 1 }, { unique: true }),
+  db.collection("sessions").createIndex({ token_hash: 1 }, { unique: true }),
+  db.collection("memberships").createIndex({ workshop_id: 1, user_id: 1 }, { unique: true }),
+  db.collection("clients").createIndex({ workshop_id: 1, deleted_at: 1, archived_at: 1 }),
+  db.collection("orders").createIndex({ workshop_id: 1, reference: 1 }, { unique: true }),
+  db.collection("financial_movements").createIndex({ workshop_id: 1, idempotency_key: 1 }, { unique: true }),
+  db.collection("plans").createIndex({ code: 1, version: 1 }, { unique: true }),
+  db.collection("contents").createIndex({ kind: 1, slug: 1, locale: 1 }, { unique: true }),
+]);
+
 console.log(`
 Jeu de données créé.
 
@@ -389,4 +397,4 @@ Jeu de données créé.
 Le collaborateur sert à vérifier REC-12 : aucun prix ne doit lui être transmis.
 `);
 
-db.close();
+await mongo.close();

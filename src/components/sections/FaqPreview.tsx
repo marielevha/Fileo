@@ -10,7 +10,7 @@ import { localePath } from "@/lib/i18n/config";
 export default async function FaqPreview({ limit = 5 }: { limit?: number }) {
   const locale = await getLocale();
   const copy = getMessages(locale).faq;
-  const entries = listPublished("faq", limit);
+  const entries = await listPublished("faq", limit);
 
   if (entries.length === 0) return null;
 

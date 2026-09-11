@@ -14,8 +14,7 @@ export const metadata: Metadata = {
 export default async function AdminDashboardPage() {
   await requireAdmin("admin.dashboard");
 
-  const counts = getAdminCounts();
-  const revenue = getRevenueByCurrency();
+  const [counts, revenue] = await Promise.all([getAdminCounts(), getRevenueByCurrency()]);
 
   const tiles = [
     { label: "Ateliers inscrits", value: counts.workshops, href: "/admin/ateliers" },

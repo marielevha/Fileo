@@ -1,6 +1,6 @@
 import "server-only";
 
-import { query, queryOne } from "@/lib/db";
+import { collection } from "@/lib/db";
 import {
   computeOrderBalance,
   money,
@@ -10,19 +10,8 @@ import {
   type OrderBalance,
 } from "@/lib/money";
 
-/**
- * Order reads, including the derived state the spec defines in §8.4 and the
- * balance rules in §8.7. All queries are scoped by workshop_id — never trust a
- * caller-supplied id alone (§16, REC-11).
- */
-
 export const ITEM_STATUSES = [
-  "a_realiser",
-  "en_cours",
-  "a_essayer",
-  "pret",
-  "remis",
-  "annule",
+  "a_realiser", "en_cours", "a_essayer", "pret", "remis", "annule",
 ] as const;
 
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
@@ -36,14 +25,8 @@ export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
   annule: "Annulé",
 };
 
-/** Derived order state (§8.4) — never stored, always computed. */
 export type OrderState =
-  | "nouvelle"
-  | "en_cours"
-  | "prete"
-  | "partiellement_remise"
-  | "remise"
-  | "annulee";
+  | "nouvelle" | "en_cours" | "prete" | "partiellement_remise" | "remise" | "annulee";
 
 export const ORDER_STATE_LABELS: Record<OrderState, string> = {
   nouvelle: "Nouvelle",
@@ -89,7 +72,6 @@ export type OrderSummary = {
   order: OrderRow;
   items: OrderItemRow[];
   state: OrderState;
-  /** Present only when the caller may see money (§4.2). */
   balance: OrderBalance | null;
   isLate: boolean;
 };
@@ -102,38 +84,21 @@ export type OrderPage = {
   pageCount: number;
 };
 
-/**
- * Derives the order state from its items.
- *
- * §8.4: an order whose non-cancelled items are all delivered is "remise" —
- * it may still be financially unpaid, which is a separate axis entirely.
- */
 export function deriveOrderState(order: OrderRow, items: OrderItemRow[]): OrderState {
   if (order.cancelled_at) return "annulee";
-
   const live = items.filter((item) => item.status !== "annule");
   if (live.length === 0) return items.length > 0 ? "annulee" : "nouvelle";
-
   const delivered = live.filter((item) => item.status === "remis");
   if (delivered.length === live.length) return "remise";
   if (delivered.length > 0) return "partiellement_remise";
-
   if (live.every((item) => item.status === "pret")) return "prete";
   if (live.some((item) => item.status !== "a_realiser")) return "en_cours";
-
   return "nouvelle";
 }
 
-/**
- * §8.1: late means a promised date has passed while the item is neither
- * delivered nor cancelled. It is a computed indicator, not a status that
- * overwrites progress.
- */
 export function isOrderLate(order: OrderRow, items: OrderItemRow[], today = new Date()): boolean {
   if (order.cancelled_at) return false;
-
   const day = today.toISOString().slice(0, 10);
-
   return items.some((item) => {
     if (item.status === "remis" || item.status === "annule") return false;
     const due = item.due_date ?? order.promised_date;
@@ -147,132 +112,100 @@ function lineTotals(items: OrderItemRow[], currency: CurrencyCode): Money[] {
     .map((item) => multiply(money(item.unit_price_amount, currency), item.quantity));
 }
 
-/** Confirmed movements only — pending offline entries never count (§8.7). */
-function movementTotals(orderId: string, currency: CurrencyCode) {
-  const rows = query<{ kind: string; amount: number }>(
-    `SELECT kind, amount FROM financial_movements
-      WHERE order_id = ? AND status = 'confirmed'`,
-    [orderId],
-  );
-
-  return {
-    payments: rows.filter((r) => r.kind === "payment").map((r) => money(r.amount, currency)),
-    refunds: rows.filter((r) => r.kind === "refund").map((r) => money(r.amount, currency)),
-  };
-}
-
-export function getOrderBalance(orderId: string, currency: CurrencyCode): OrderBalance {
-  const items = query<OrderItemRow>(
-    `SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, created_at`,
-    [orderId],
-  );
-
-  const order = queryOne<{ discount_amount: number }>(
-    `SELECT discount_amount FROM orders WHERE id = ?`,
-    [orderId],
-  );
-
-  const { payments, refunds } = movementTotals(orderId, currency);
-
+export async function getOrderBalance(orderId: string, currency: CurrencyCode): Promise<OrderBalance> {
+  const itemsCollection = await collection("order_items");
+  const orders = await collection("orders");
+  const movements = await collection("financial_movements");
+  const [items, order, movementRows] = await Promise.all([
+    itemsCollection.find({ order_id: orderId }, { projection: { _id: 0 } })
+      .sort({ sort_order: 1, created_at: 1 }).toArray() as unknown as Promise<OrderItemRow[]>,
+    orders.findOne({ id: orderId }, { projection: { discount_amount: 1 } }),
+    movements.find({ order_id: orderId, status: "confirmed" }, { projection: { kind: 1, amount: 1 } }).toArray(),
+  ]);
   return computeOrderBalance({
     currency,
     lineTotals: lineTotals(items, currency),
-    discount: money(order?.discount_amount ?? 0, currency),
-    confirmedPayments: payments,
-    confirmedRefunds: refunds,
+    discount: money(Number(order?.discount_amount ?? 0), currency),
+    confirmedPayments: movementRows.filter((row) => row.kind === "payment").map((row) => money(Number(row.amount), currency)),
+    confirmedRefunds: movementRows.filter((row) => row.kind === "refund").map((row) => money(Number(row.amount), currency)),
   });
 }
 
-export function listOrders(
-  workshopId: string,
-  options: { includeMoney: boolean; limit?: number; clientId?: string },
-): OrderSummary[] {
-  const rows = query<OrderRow>(
-    `SELECT o.*, c.display_name AS client_name
-       FROM orders o
-       JOIN clients c ON c.id = o.client_id
-      WHERE o.workshop_id = ?
-        AND (? IS NULL OR o.client_id = ?)
-      ORDER BY o.created_at DESC
-      LIMIT ?`,
-    [workshopId, options.clientId ?? null, options.clientId ?? null, options.limit ?? 100],
-  );
-
-  return rows.map((order) => buildSummary(order, options.includeMoney));
+async function attachClientNames(rows: Record<string, unknown>[]): Promise<OrderRow[]> {
+  if (rows.length === 0) return [];
+  const clients = await collection("clients");
+  const ids = [...new Set(rows.map((row) => String(row.client_id)))];
+  const names = await clients.find(
+    { id: { $in: ids } },
+    { projection: { _id: 0, id: 1, display_name: 1 } },
+  ).toArray();
+  const byId = new Map(names.map((client) => [String(client.id), String(client.display_name)]));
+  return rows.map((row) => ({ ...row, client_name: byId.get(String(row.client_id)) ?? "Client supprimé" })) as OrderRow[];
 }
 
-export function listOrdersPage(
+export async function listOrders(
+  workshopId: string,
+  options: { includeMoney: boolean; limit?: number; clientId?: string },
+): Promise<OrderSummary[]> {
+  const orders = await collection("orders");
+  const filter = { workshop_id: workshopId, ...(options.clientId ? { client_id: options.clientId } : {}) };
+  const raw = await orders.find(filter, { projection: { _id: 0 } })
+    .sort({ created_at: -1 }).limit(options.limit ?? 100).toArray();
+  const rows = await attachClientNames(raw);
+  return Promise.all(rows.map((order) => buildSummary(order, options.includeMoney)));
+}
+
+export async function listOrdersPage(
   workshopId: string,
   options: { includeMoney: boolean; page?: number; pageSize?: number },
-): OrderPage {
+): Promise<OrderPage> {
+  const orders = await collection("orders");
   const pageSize = Math.min(50, Math.max(1, Math.trunc(options.pageSize ?? 10)));
-  const total = queryOne<{ total: number }>(
-    "SELECT COUNT(*) AS total FROM orders WHERE workshop_id = ?",
-    [workshopId],
-  )?.total ?? 0;
+  const total = await orders.countDocuments({ workshop_id: workshopId });
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(pageCount, Math.max(1, Math.trunc(options.page ?? 1)));
-  const rows = query<OrderRow>(
-    `SELECT o.*, c.display_name AS client_name
-       FROM orders o
-       JOIN clients c ON c.id = o.client_id
-      WHERE o.workshop_id = ?
-      ORDER BY o.created_at DESC, o.id DESC
-      LIMIT ? OFFSET ?`,
-    [workshopId, pageSize, (page - 1) * pageSize],
-  );
-
+  const raw = await orders.find({ workshop_id: workshopId }, { projection: { _id: 0 } })
+    .sort({ created_at: -1, id: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray();
+  const rows = await attachClientNames(raw);
   return {
-    items: rows.map((order) => buildSummary(order, options.includeMoney)),
-    total,
-    page,
-    pageSize,
-    pageCount,
+    items: await Promise.all(rows.map((order) => buildSummary(order, options.includeMoney))),
+    total, page, pageSize, pageCount,
   };
 }
 
-export function getOrder(
+export async function getOrder(
   workshopId: string,
   orderId: string,
   includeMoney: boolean,
-): OrderSummary | null {
-  const order = queryOne<OrderRow>(
-    `SELECT o.*, c.display_name AS client_name
-       FROM orders o
-       JOIN clients c ON c.id = o.client_id
-      WHERE o.workshop_id = ? AND o.id = ?`,
-    [workshopId, orderId],
+): Promise<OrderSummary | null> {
+  const orders = await collection("orders");
+  const raw = await orders.findOne(
+    { workshop_id: workshopId, id: orderId },
+    { projection: { _id: 0 } },
   );
-
-  return order ? buildSummary(order, includeMoney) : null;
+  if (!raw) return null;
+  const [order] = await attachClientNames([raw]);
+  return buildSummary(order, includeMoney);
 }
 
-function buildSummary(order: OrderRow, includeMoney: boolean): OrderSummary {
-  const items = query<OrderItemRow>(
-    `SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order, created_at`,
-    [order.id],
-  );
-
+async function buildSummary(order: OrderRow, includeMoney: boolean): Promise<OrderSummary> {
+  const itemsCollection = await collection("order_items");
+  const items = await itemsCollection.find(
+    { order_id: order.id },
+    { projection: { _id: 0 } },
+  ).sort({ sort_order: 1, created_at: 1 }).toArray() as unknown as OrderItemRow[];
   const currency = order.currency as CurrencyCode;
-
   return {
     order,
-    // Prices are stripped for actors without money.read (REC-12).
-    items: includeMoney
-      ? items
-      : items.map((item) => ({ ...item, unit_price_amount: 0 })),
+    items: includeMoney ? items : items.map((item) => ({ ...item, unit_price_amount: 0 })),
     state: deriveOrderState(order, items),
-    balance: includeMoney ? getOrderBalance(order.id, currency) : null,
+    balance: includeMoney ? await getOrderBalance(order.id, currency) : null,
     isLate: isOrderLate(order, items),
   };
 }
 
-/** Next human-readable reference for the workshop, e.g. CMD-0042 (§8.4). */
-export function nextOrderReference(workshopId: string): string {
-  const row = queryOne<{ total: number }>(
-    `SELECT COUNT(*) AS total FROM orders WHERE workshop_id = ?`,
-    [workshopId],
-  );
-
-  return `CMD-${String((row?.total ?? 0) + 1).padStart(4, "0")}`;
+export async function nextOrderReference(workshopId: string): Promise<string> {
+  const orders = await collection("orders");
+  const total = await orders.countDocuments({ workshop_id: workshopId });
+  return `CMD-${String(total + 1).padStart(4, "0")}`;
 }

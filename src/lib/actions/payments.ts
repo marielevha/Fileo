@@ -28,7 +28,7 @@ export async function recordPaymentAction(
   formData: FormData,
 ): Promise<PaymentFormState> {
   const session = await requireWorkshop("money.write");
-  const summary = getOrder(session.workshop.id, orderId, true);
+  const summary = await getOrder(session.workshop.id, orderId, true);
   if (!summary) return { error: "Cette commande n'existe plus ou n'est pas accessible." };
 
   const currency = summary.order.currency;
@@ -58,7 +58,7 @@ export async function recordPaymentAction(
   }
 
   try {
-    recordPayment({
+    await recordPayment({
       workshopId: session.workshop.id,
       orderId,
       actorUserId: session.user.id,

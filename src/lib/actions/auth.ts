@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { execute, newId, nowIso, queryOne, transaction } from "@/lib/db";
+import { collection, newId, nowIso, withTransaction } from "@/lib/db";
 import { hashPassword, validatePasswordStrength, verifyPassword } from "@/lib/auth/password";
 import { createSession, destroySession, getSession, parsePlatformRoles } from "@/lib/auth/session";
 import { recordAudit } from "@/lib/audit";
@@ -26,9 +26,10 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   const phone = parsePhone(rawPhone, country);
   if (!phone.ok) return { error: phone.error };
 
-  const user = queryOne<{ id: string; password_hash: string; status: string; platform_roles: string }>(
-    `SELECT id, password_hash, status, platform_roles FROM users WHERE phone_e164 = ?`,
-    [phone.e164],
+  const users = await collection("users");
+  const user = await users.findOne(
+    { phone_e164: phone.e164 },
+    { projection: { id: 1, password_hash: 1, status: 1, platform_roles: 1 } },
   );
 
   // Same message whether the number is unknown or the password is wrong:
@@ -40,11 +41,11 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
   if (user.status !== "active") return { error: "Ce compte est désactivé." };
 
   await createSession(user.id);
-  recordAudit({ actorUserId: user.id, action: "auth.login", entityKind: "user", entityId: user.id });
+  await recordAudit({ actorUserId: String(user.id), action: "auth.login", entityKind: "user", entityId: String(user.id) });
 
-  const platformRoles = parsePlatformRoles(user.platform_roles);
+  const platformRoles = parsePlatformRoles(String(user.platform_roles));
   const destination = canInAdmin(
-    { userId: user.id, platformRoles },
+    { userId: String(user.id), platformRoles },
     "admin.dashboard",
   )
     ? "/admin"
@@ -81,78 +82,44 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
   if (workshopName.length < 2) return { error: "Merci d'indiquer le nom de votre atelier." };
   if (!isCurrencyCode(currency)) return { error: "Devise invalide." };
 
-  const existing = queryOne<{ id: string }>(`SELECT id FROM users WHERE phone_e164 = ?`, [
-    phone.e164,
-  ]);
+  const users = await collection("users");
+  const existing = await users.findOne({ phone_e164: phone.e164 }, { projection: { id: 1 } });
   if (existing) return { error: "Un compte existe déjà avec ce numéro." };
 
-  const selectedPlan = queryOne<{ id: string }>(
-    `SELECT id FROM plans
-      WHERE country_code = ? AND archived_at IS NULL
-        AND (? = '' OR code = ?)
-      ORDER BY price_amount ASC, version DESC LIMIT 1`,
-    [country, planCode, planCode],
+  const plans = await collection("plans");
+  const selectedPlan = await plans.findOne(
+    { country_code: country, archived_at: null, ...(planCode ? { code: planCode } : {}) },
+    { sort: { price_amount: 1, version: -1 }, projection: { id: 1 } },
   );
   if (!selectedPlan) return { error: "L'offre sélectionnée n'est pas disponible pour ce pays." };
 
   const passwordHash = await hashPassword(password);
   const countryInfo = COUNTRIES[country as CountryCode];
 
-  const userId = transaction(() => {
+  const userId = await withTransaction(async (mongoSession) => {
     const uid = newId();
     const wid = newId();
-
-    execute(
-      `INSERT INTO users
-         (id, full_name, phone_e164, password_hash, status, platform_roles, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', '[]', ?, ?)`,
-      [uid, fullName, phone.e164, passwordHash, nowIso(), nowIso()],
-    );
-
-    execute(
-      `INSERT INTO workshops
-         (id, name, owner_user_id, country_code, city, phone_e164, currency,
-          timezone, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-      [
-        wid,
-        workshopName,
-        uid,
-        country,
-        city || null,
-        phone.e164,
-        currency,
-        countryInfo.defaultTimezone,
-        nowIso(),
-        nowIso(),
-      ],
-    );
-
-    execute(
-      `INSERT INTO memberships
-         (id, workshop_id, user_id, role, can_view_money, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'owner', 1, 'active', ?, ?)`,
-      [newId(), wid, uid, nowIso(), nowIso()],
-    );
+    const timestamp = nowIso();
+    const workshops = await collection("workshops");
+    const memberships = await collection("memberships");
+    const subscriptions = await collection("subscriptions");
+    await users.insertOne({ id: uid, full_name: fullName, phone_e164: phone.e164, phone_verified_at: null, email: null, email_verified_at: null, password_hash: passwordHash, status: "active", platform_roles: "[]", created_at: timestamp, updated_at: timestamp, row_version: 1 }, { session: mongoSession });
+    await workshops.insertOne({ id: wid, name: workshopName, owner_user_id: uid, country_code: country, city: city || null, phone_e164: phone.e164, address: null, currency, currency_locked_at: null, timezone: countryInfo.defaultTimezone, logo_media_id: null, receipt_footer: null, status: "active", suspended_reason: null, created_at: timestamp, updated_at: timestamp, row_version: 1 }, { session: mongoSession });
+    await memberships.insertOne({ id: newId(), workshop_id: wid, user_id: uid, role: "owner", can_view_money: 1, status: "active", invited_at: null, created_at: timestamp, updated_at: timestamp, row_version: 1 }, { session: mongoSession });
 
     // The pricing-page choice is preserved through signup. Direct signups
     // receive the least expensive active offer for their country (§6.2).
     const trialEnd = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
-    execute(
-      `INSERT INTO subscriptions
-         (id, workshop_id, plan_id, status, trial_ends_at, current_period_end, created_at, updated_at)
-       VALUES (?, ?, ?, 'trial', ?, ?, ?, ?)`,
-      [newId(), wid, selectedPlan.id, trialEnd, trialEnd, nowIso(), nowIso()],
-    );
+    await subscriptions.insertOne({ id: newId(), workshop_id: wid, plan_id: selectedPlan.id, status: "trial", trial_ends_at: trialEnd, current_period_end: trialEnd, grace_ends_at: null, cancel_at_period_end: 0, cancelled_at: null, created_at: timestamp, updated_at: timestamp, row_version: 1 }, { session: mongoSession });
 
-    recordAudit({
+    await recordAudit({
       workshopId: wid,
       actorUserId: uid,
       action: "workshop.create",
       entityKind: "workshop",
       entityId: wid,
       after: { name: workshopName, country, currency },
-    });
+    }, mongoSession);
 
     return uid;
   });
@@ -173,7 +140,7 @@ export async function signOut(): Promise<void> {
   const session = await getSession();
 
   if (session) {
-    recordAudit({
+    await recordAudit({
       actorUserId: session.user.id,
       action: "auth.logout",
       entityKind: "user",

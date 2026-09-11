@@ -40,7 +40,7 @@ export default async function AdminPaymentsPage({
   await requireAdmin("admin.payments.validate");
 
   const { statut } = await searchParams;
-  const payments = listPlatformPayments(statut);
+  const payments = await listPlatformPayments(statut);
 
   return (
     <>

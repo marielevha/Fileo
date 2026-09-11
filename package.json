@@ -15,9 +15,11 @@
     "check:planning": "node scripts/check-planning.mjs",
     "check:payments": "node scripts/check-payments.mjs",
     "db:seed": "node scripts/seed.mjs",
-    "db:reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\" && node scripts/seed.mjs"
+    "db:reset": "node scripts/seed.mjs",
+    "db:migrate:sqlite": "node scripts/migrate-sqlite-to-mongodb.mjs"
   },
   "dependencies": {
+    "mongodb": "^7.6.0",
     "next": "^15.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

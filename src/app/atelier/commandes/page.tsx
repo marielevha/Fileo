@@ -33,7 +33,7 @@ export default async function OrdersPage({
   const params = await searchParams;
   const requestedPageSize = Number(params.taille);
   const pageSize = [10, 20, 50].includes(requestedPageSize) ? requestedPageSize : 10;
-  const result = listOrdersPage(workshop.id, {
+  const result = await listOrdersPage(workshop.id, {
     includeMoney: workshop.canViewMoney,
     page: Number(params.page) || 1,
     pageSize,

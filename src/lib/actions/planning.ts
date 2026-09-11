@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { recordAudit } from "@/lib/audit";
 import { requireWorkshop } from "@/lib/auth/guards";
-import { execute, newId, nowIso, transaction } from "@/lib/db";
+import { collection, newId, nowIso, withTransaction } from "@/lib/db";
 import { localePath } from "@/lib/i18n/config";
 import { getLocale } from "@/lib/i18n/request";
 import {
@@ -39,7 +39,7 @@ export async function updatePlanningItemAction(
   formData: FormData,
 ): Promise<PlanningItemActionState> {
   const session = await requireWorkshop("orders.write");
-  const item = getPlanningItemForUpdate(session.workshop.id, itemId);
+  const item = await getPlanningItemForUpdate(session.workshop.id, itemId);
   if (!item) return { error: "Cet article n'existe plus ou n'est pas accessible." };
 
   const statusValue = String(formData.get("status") ?? "");
@@ -52,7 +52,7 @@ export async function updatePlanningItemAction(
 
   const rawAssignee = String(formData.get("assigneeId") ?? "").trim();
   const assigneeId = rawAssignee || null;
-  if (assigneeId && !isActivePlanningMember(session.workshop.id, assigneeId)) {
+  if (assigneeId && !(await isActivePlanningMember(session.workshop.id, assigneeId))) {
     return { error: "Le collaborateur sélectionné n'est plus actif dans cet atelier." };
   }
 
@@ -77,7 +77,7 @@ export async function updatePlanningItemAction(
 
   const changedAt = nowIso();
   try {
-    transaction(() => {
+    await withTransaction(async (mongoSession) => {
       const deliveredAt = status === "remis"
         ? item.delivered_at ?? changedAt
         : item.status === "remis"
@@ -90,39 +90,27 @@ export async function updatePlanningItemAction(
           : item.cancelled_at;
       const deliveredQuantity = status === "remis" ? item.quantity : item.status === "remis" ? 0 : undefined;
 
-      const result = execute(
-        `UPDATE order_items
-            SET status = ?, due_date = ?, assignee_user_id = ?,
-                delivered_at = ?, cancelled_at = ?,
-                delivered_quantity = COALESCE(?, delivered_quantity),
-                updated_at = ?, row_version = row_version + 1
-          WHERE id = ? AND workshop_id = ? AND row_version = ?`,
-        [
-          status,
-          dueDate,
-          assigneeId,
-          deliveredAt,
-          cancelledAt,
-          deliveredQuantity ?? null,
-          changedAt,
-          item.item_id,
-          session.workshop.id,
-          expectedVersion,
-        ],
+      const items = await collection("order_items");
+      const set: Record<string, unknown> = {
+        status, due_date: dueDate, assignee_user_id: assigneeId,
+        delivered_at: deliveredAt, cancelled_at: cancelledAt, updated_at: changedAt,
+      };
+      if (deliveredQuantity !== undefined) set.delivered_quantity = deliveredQuantity;
+      const result = await items.updateOne(
+        { id: item.item_id, workshop_id: session.workshop.id, row_version: expectedVersion },
+        { $set: set, $inc: { row_version: 1 } },
+        { session: mongoSession },
       );
-      if (Number(result.changes) !== 1) throw new Error("planning_conflict");
+      if (result.modifiedCount !== 1) throw new Error("planning_conflict");
 
       if (dateChanged) {
-        execute(
-          `INSERT INTO order_date_changes
-             (id, workshop_id, order_id, order_item_id, previous_date, new_date, reason, changed_by, changed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            newId(), session.workshop.id, item.order_id, item.item_id,
-            item.due_date, dueDate, reason, session.user.id, changedAt,
-          ],
-        );
-        recordAudit({
+        const changes = await collection("order_date_changes");
+        await changes.insertOne({
+          id: newId(), workshop_id: session.workshop.id, order_id: item.order_id,
+          order_item_id: item.item_id, previous_date: item.due_date, new_date: dueDate,
+          reason, changed_by: session.user.id, changed_at: changedAt,
+        }, { session: mongoSession });
+        await recordAudit({
           workshopId: session.workshop.id,
           actorUserId: session.user.id,
           action: "order.date_change",
@@ -131,11 +119,11 @@ export async function updatePlanningItemAction(
           reason,
           before: { dueDate: item.due_date },
           after: { dueDate },
-        });
+        }, mongoSession);
       }
 
       if (statusChanged) {
-        recordAudit({
+        await recordAudit({
           workshopId: session.workshop.id,
           actorUserId: session.user.id,
           action: "item.status_change",
@@ -144,11 +132,11 @@ export async function updatePlanningItemAction(
           reason: reason || null,
           before: { status: item.status },
           after: { status, deliveredAt },
-        });
+        }, mongoSession);
       }
 
       if (assignmentChanged) {
-        recordAudit({
+        await recordAudit({
           workshopId: session.workshop.id,
           actorUserId: session.user.id,
           action: "item.update",
@@ -156,7 +144,7 @@ export async function updatePlanningItemAction(
           entityId: item.item_id,
           before: { assigneeUserId: item.assignee_user_id },
           after: { assigneeUserId: assigneeId },
-        });
+        }, mongoSession);
       }
     });
   } catch (error) {

@@ -36,7 +36,7 @@ export async function submitContact(
 
   const session = await getSession();
 
-  createTicket({
+  await createTicket({
     workshopId: session?.workshop?.id ?? null,
     requesterUserId: session?.user.id ?? null,
     requesterName: name,

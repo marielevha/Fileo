@@ -1,9 +1,7 @@
-import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { closeMongo, mongoDb as db } from "./mongodb.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const db = new DatabaseSync(join(process.cwd(), "data", "fileo.db"));
 const cookies = new Map();
 let createdId = null;
 const paginationIds = [];
@@ -100,7 +98,7 @@ try {
   check("création redirige vers la fiche", createResponse.status === 303 && Boolean(createdId));
   check(
     "client créé en base",
-    Boolean(db.prepare("SELECT id FROM clients WHERE id = ? AND deleted_at IS NULL").get(createdId)),
+    Boolean(await db.collection("clients").findOne({ id: createdId, deleted_at: null })),
   );
 
   const editPath = `/fr/atelier/clients/${createdId}/modifier`;
@@ -117,24 +115,22 @@ try {
   check("modification redirige vers la fiche", updateResponse.status === 303);
   check(
     "modification persistée",
-    db.prepare("SELECT display_name FROM clients WHERE id = ?").get(createdId)?.display_name === updatedName,
+    (await db.collection("clients").findOne({ id: createdId }))?.display_name === updatedName,
   );
 
   const searchPage = await get(`/fr/atelier/clients?q=${encodeURIComponent(updatedName)}`);
   check("recherche directe filtre la liste", searchPage.html.includes(updatedName) && !searchPage.html.includes("Grâce B"));
 
-  const owner = db.prepare("SELECT workshop_id, created_by FROM clients WHERE id = ?").get(createdId);
+  const owner = await db.collection("clients").findOne({ id: createdId }, { projection: { workshop_id: 1, created_by: 1 } });
   const paginationPrefix = `Pagination test ${Date.now()}`;
-  const insertClient = db.prepare(`
-    INSERT INTO clients (id, workshop_id, display_name, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
+  const paginationRows = [];
   for (let index = 1; index <= 11; index += 1) {
     const id = randomUUID();
     const now = new Date().toISOString();
     paginationIds.push(id);
-    insertClient.run(id, owner.workshop_id, `${paginationPrefix} ${String(index).padStart(2, "0")}`, owner.created_by, now, now);
+    paginationRows.push({ id, workshop_id: owner.workshop_id, display_name: `${paginationPrefix} ${String(index).padStart(2, "0")}`, phone_e164: null, phone_search: null, other_contact: null, guardian_name: null, guardian_phone: null, notes: null, archived_at: null, deleted_at: null, created_by: owner.created_by, created_at: now, updated_at: now, row_version: 1 });
   }
+  await db.collection("clients").insertMany(paginationRows);
 
   const encodedPrefix = encodeURIComponent(paginationPrefix);
   const firstPage = await get(`/fr/atelier/clients?q=${encodedPrefix}&sort=name&dir=asc&taille=10&page=1`);
@@ -158,17 +154,17 @@ try {
   check("suppression redirige vers la liste", deleteResponse.status === 303);
   check(
     "deleted_at renseigné",
-    Boolean(db.prepare("SELECT deleted_at FROM clients WHERE id = ?").get(createdId)?.deleted_at),
+    Boolean((await db.collection("clients").findOne({ id: createdId }))?.deleted_at),
   );
   const listPage = await get("/fr/atelier/clients");
   check("client supprimé absent de la liste", !listPage.html.includes(updatedName));
 
   console.log("\nTout est conforme.\n");
 } finally {
-  for (const id of paginationIds) db.prepare("DELETE FROM clients WHERE id = ?").run(id);
+  await db.collection("clients").deleteMany({ id: { $in: paginationIds } });
   if (createdId) {
-    db.prepare("DELETE FROM audit_log WHERE entity_id = ?").run(createdId);
-    db.prepare("DELETE FROM clients WHERE id = ?").run(createdId);
+    await db.collection("audit_log").deleteMany({ entity_id: createdId });
+    await db.collection("clients").deleteOne({ id: createdId });
   }
-  db.close();
+  await closeMongo();
 }

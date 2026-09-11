@@ -30,7 +30,7 @@ export default async function RecordPaymentPage({
   if (!session.workshop.canViewMoney) notFound();
   const locale = await getLocale();
   const { id } = await params;
-  const summary = getOrder(session.workshop.id, id, true);
+  const summary = await getOrder(session.workshop.id, id, true);
   if (!summary) notFound();
 
   const { order, balance } = summary;

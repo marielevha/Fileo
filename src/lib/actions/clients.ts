@@ -62,7 +62,7 @@ export async function createClientAction(
   if ("error" in parsed) return { error: parsed.error };
   const locale = await getLocale();
   const session = await requireWorkshop("clients.write");
-  const id = createClient({
+  const id = await createClient({
     workshopId: parsed.workshop.id,
     actorUserId: session.user.id,
     ...parsed.values,
@@ -80,7 +80,7 @@ export async function updateClientAction(
   if ("error" in parsed) return { error: parsed.error };
   const locale = await getLocale();
   const session = await requireWorkshop("clients.write");
-  const updated = updateClient({
+  const updated = await updateClient({
     clientId,
     workshopId: parsed.workshop.id,
     actorUserId: session.user.id,
@@ -93,9 +93,9 @@ export async function updateClientAction(
 
 export async function toggleClientArchiveAction(clientId: string): Promise<void> {
   const session = await requireWorkshop("clients.write");
-  const client = getClient(session.workshop.id, clientId);
+  const client = await getClient(session.workshop.id, clientId);
   if (!client) return;
-  archiveClient({
+  await archiveClient({
     workshopId: session.workshop.id,
     clientId,
     actorUserId: session.user.id,
@@ -108,7 +108,7 @@ export async function toggleClientArchiveAction(clientId: string): Promise<void>
 
 export async function deleteClientAction(clientId: string): Promise<void> {
   const session = await requireWorkshop("clients.write");
-  softDeleteClient({
+  await softDeleteClient({
     workshopId: session.workshop.id,
     clientId,
     actorUserId: session.user.id,

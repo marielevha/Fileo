@@ -17,9 +17,11 @@ export default async function DashboardPage() {
   const { workshop } = await requireWorkshop();
   const currency = workshop.currency as CurrencyCode;
 
-  const counts = getDashboardCounts(workshop.id);
-  const agenda = getAgenda(workshop.id, 8);
-  const finance = workshop.canViewMoney ? getDashboardMoney(workshop.id, currency) : null;
+  const [counts, agenda, finance] = await Promise.all([
+    getDashboardCounts(workshop.id),
+    getAgenda(workshop.id, 8),
+    workshop.canViewMoney ? getDashboardMoney(workshop.id, currency) : Promise.resolve(null),
+  ]);
 
   const tiles = [
     {

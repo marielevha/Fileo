@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
+import { closeMongo, mongoDb as db } from "./mongodb.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const db = new DatabaseSync(join(process.cwd(), "data", "fileo.db"));
 const cookies = new Map();
 const startedAt = new Date().toISOString();
 let sessionToken = null;
@@ -67,17 +65,13 @@ function check(label, condition) {
   if (!condition) throw new Error(label);
 }
 
-const item = db.prepare(
-  `SELECT oi.*, o.reference
-     FROM order_items oi
-     JOIN orders o ON o.id = oi.order_id
-    WHERE o.cancelled_at IS NULL
-    ORDER BY oi.created_at
-    LIMIT 1`,
-).get();
-const collaborator = db.prepare(
-  "SELECT id FROM users WHERE phone_e164 = ?",
-).get("+242062222222");
+const [item] = await db.collection("order_items").aggregate([
+  { $sort: { created_at: 1 } },
+  { $lookup: { from: "orders", localField: "order_id", foreignField: "id", as: "order" } },
+  { $unwind: "$order" }, { $match: { "order.cancelled_at": null } },
+  { $set: { reference: "$order.reference" } }, { $limit: 1 },
+]).toArray();
+const collaborator = await db.collection("users").findOne({ phone_e164: "+242062222222" }, { projection: { id: 1 } });
 
 try {
   console.log("\nPlanning - replanification et suivi\n");
@@ -109,15 +103,13 @@ try {
   );
   check("mise à jour acceptée", firstResponse.status === 303);
 
-  const updated = db.prepare(
-    "SELECT status, due_date, assignee_user_id, row_version FROM order_items WHERE id = ?",
-  ).get(item.id);
+  const updated = await db.collection("order_items").findOne({ id: item.id }, { projection: { status: 1, due_date: 1, assignee_user_id: 1, row_version: 1 } });
   check("échéance modifiée", updated.due_date === newDate);
   check("collaborateur affecté", updated.assignee_user_id === collaborator.id);
   check("état prêt enregistré", updated.status === "pret");
   check(
     "changement de date historisé",
-    Boolean(db.prepare("SELECT 1 FROM order_date_changes WHERE order_item_id = ? AND changed_at >= ?").get(item.id, startedAt)),
+    Boolean(await db.collection("order_date_changes").findOne({ order_item_id: item.id, changed_at: { $gte: startedAt } })),
   );
 
   const refreshedPage = await get(planningPath);
@@ -132,41 +124,24 @@ try {
     },
   );
   check("remise acceptée", deliveryResponse.status === 303);
-  const delivered = db.prepare(
-    "SELECT status, delivered_at, delivered_quantity FROM order_items WHERE id = ?",
-  ).get(item.id);
+  const delivered = await db.collection("order_items").findOne({ id: item.id }, { projection: { status: 1, delivered_at: 1, delivered_quantity: 1 } });
   check("date de remise renseignée", delivered.status === "remis" && Boolean(delivered.delivered_at));
   check("quantité remise cohérente", delivered.delivered_quantity === item.quantity);
   check(
     "changements audités",
-    db.prepare("SELECT COUNT(*) AS total FROM audit_log WHERE entity_id = ? AND created_at >= ?").get(item.id, startedAt).total >= 3,
+    await db.collection("audit_log").countDocuments({ entity_id: item.id, created_at: { $gte: startedAt } }) >= 3,
   );
 
   const deliveredPage = await get(`/fr/atelier/planning?statut=remis&q=${encodeURIComponent(item.reference)}`);
   check("remise visible dans le planning", deliveredPage.html.includes("Remise") && deliveredPage.html.includes(item.reference));
   console.log("\nTout est conforme.\n");
 } finally {
-  db.prepare(
-    `UPDATE order_items
-        SET status = ?, due_date = ?, assignee_user_id = ?, delivered_at = ?,
-            delivered_quantity = ?, cancelled_at = ?, updated_at = ?, row_version = ?
-      WHERE id = ?`,
-  ).run(
-    item.status,
-    item.due_date,
-    item.assignee_user_id,
-    item.delivered_at,
-    item.delivered_quantity,
-    item.cancelled_at,
-    item.updated_at,
-    item.row_version,
-    item.id,
-  );
-  db.prepare("DELETE FROM order_date_changes WHERE order_item_id = ? AND changed_at >= ?").run(item.id, startedAt);
-  db.prepare("DELETE FROM audit_log WHERE entity_id = ? AND created_at >= ?").run(item.id, startedAt);
+  await db.collection("order_items").updateOne({ id: item.id }, { $set: { status: item.status, due_date: item.due_date ?? null, assignee_user_id: item.assignee_user_id ?? null, delivered_at: item.delivered_at ?? null, delivered_quantity: item.delivered_quantity ?? 0, cancelled_at: item.cancelled_at ?? null, updated_at: item.updated_at, row_version: item.row_version } });
+  await db.collection("order_date_changes").deleteMany({ order_item_id: item.id, changed_at: { $gte: startedAt } });
+  await db.collection("audit_log").deleteMany({ entity_id: item.id, created_at: { $gte: startedAt } });
   if (sessionToken) {
     const tokenHash = createHash("sha256").update(sessionToken).digest("hex");
-    db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
+    await db.collection("sessions").deleteOne({ token_hash: tokenHash });
   }
-  db.close();
+  await closeMongo();
 }

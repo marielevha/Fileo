@@ -1,9 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
+import { closeMongo, mongoDb as db } from "./mongodb.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const db = new DatabaseSync(join(process.cwd(), "data", "fileo.db"));
 const orderIds = [];
 let sessionId = null;
 
@@ -18,50 +16,25 @@ function check(label, condition) {
 
 try {
   console.log("\nCommandes - pagination\n");
-  const owner = db.prepare("SELECT id FROM users WHERE phone_e164 = ?").get("+242061111111");
-  const membership = db.prepare(
-    "SELECT workshop_id FROM memberships WHERE user_id = ? AND status = 'active' LIMIT 1",
-  ).get(owner.id);
-  const client = db.prepare(
-    "SELECT id FROM clients WHERE workshop_id = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1",
-  ).get(membership.workshop_id);
+  const owner = await db.collection("users").findOne({ phone_e164: "+242061111111" }, { projection: { id: 1 } });
+  const membership = await db.collection("memberships").findOne({ user_id: owner.id, status: "active" }, { projection: { workshop_id: 1 } });
+  const client = await db.collection("clients").findOne({ workshop_id: membership.workshop_id, deleted_at: null }, { sort: { created_at: 1 }, projection: { id: 1 } });
 
   const token = randomBytes(32).toString("base64url");
   sessionId = randomUUID();
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    sessionId,
-    owner.id,
-    createHash("sha256").update(token).digest("hex"),
-    now,
-    now,
-    new Date(Date.now() + 60_000).toISOString(),
-  );
+  await db.collection("sessions").insertOne({ id: sessionId, user_id: owner.id, token_hash: createHash("sha256").update(token).digest("hex"), workshop_id: null, user_agent: "check:orders", created_at: now, last_seen_at: now, expires_at: new Date(Date.now() + 60_000).toISOString(), revoked_at: null });
 
   const prefix = `PAGE-${Date.now()}`;
-  const insertOrder = db.prepare(
-    `INSERT INTO orders (
-       id, workshop_id, client_id, reference, currency, created_by, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, 'XAF', ?, ?, ?)`,
-  );
+  const orderRows = [];
   const baseTime = Date.now();
   for (let index = 1; index <= 11; index += 1) {
     const id = randomUUID();
     const createdAt = new Date(baseTime + index * 1_000).toISOString();
     orderIds.push(id);
-    insertOrder.run(
-      id,
-      membership.workshop_id,
-      client.id,
-      `${prefix}-${String(index).padStart(2, "0")}`,
-      owner.id,
-      createdAt,
-      createdAt,
-    );
+    orderRows.push({ id, workshop_id: membership.workshop_id, client_id: client.id, reference: `${prefix}-${String(index).padStart(2, "0")}`, currency: "XAF", discount_amount: 0, discount_reason: null, instructions: null, promised_date: null, fitting_date: null, cancelled_at: null, created_by: owner.id, created_at: createdAt, updated_at: createdAt, row_version: 1 });
   }
+  await db.collection("orders").insertMany(orderRows);
 
   async function get(path) {
     const response = await fetch(`${BASE}${path}`, {
@@ -93,7 +66,7 @@ try {
 
   console.log("\nTout est conforme.\n");
 } finally {
-  for (const id of orderIds) db.prepare("DELETE FROM orders WHERE id = ?").run(id);
-  if (sessionId) db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
-  db.close();
+  await db.collection("orders").deleteMany({ id: { $in: orderIds } });
+  if (sessionId) await db.collection("sessions").deleteOne({ id: sessionId });
+  await closeMongo();
 }

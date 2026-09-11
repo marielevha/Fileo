@@ -15,10 +15,10 @@ export const metadata: Metadata = { title: "Fiche client", robots: { index: fals
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { workshop } = await requireWorkshop("clients.read");
   const { id } = await params;
-  const client = getClient(workshop.id, id);
+  const client = await getClient(workshop.id, id);
   if (!client) notFound();
   const locale = await getLocale();
-  const measurements = listMeasurements(workshop.id, id);
+  const measurements = await listMeasurements(workshop.id, id);
 
   return (
     <>

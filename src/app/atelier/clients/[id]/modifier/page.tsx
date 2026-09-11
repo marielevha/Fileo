@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Modifier un client", robots: { index
 export default async function EditClientPage({ params }: { params: Promise<{ id: string }> }) {
   const { workshop } = await requireWorkshop("clients.write");
   const { id } = await params;
-  const client = getClient(workshop.id, id);
+  const client = await getClient(workshop.id, id);
   if (!client) notFound();
   const locale = await getLocale();
   const detailHref = localePath(locale, `/atelier/clients/${id}`);

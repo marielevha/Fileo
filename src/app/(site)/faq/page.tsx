@@ -10,8 +10,8 @@ export const metadata: Metadata = {
   description: `Questions fréquentes sur ${site.name} : compte, tarifs, paiements, appareils et données.`,
 };
 
-export default function FaqPage() {
-  const entries = listPublished("faq", 100);
+export default async function FaqPage() {
+  const entries = await listPublished("faq", 100);
 
   return (
     <>

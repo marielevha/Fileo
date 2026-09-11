@@ -27,12 +27,12 @@ export default async function OrderDetailPage({
   const { id } = await params;
   const query = await searchParams;
 
-  const summary = getOrder(workshop.id, id, workshop.canViewMoney);
+  const summary = await getOrder(workshop.id, id, workshop.canViewMoney);
   if (!summary) notFound();
 
   const { order, items, state, balance, isLate } = summary;
   const currency = order.currency as CurrencyCode;
-  const movements = workshop.canViewMoney ? listMovements(workshop.id, order.id) : [];
+  const movements = workshop.canViewMoney ? await listMovements(workshop.id, order.id) : [];
 
   return (
     <>

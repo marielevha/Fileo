@@ -26,7 +26,7 @@ export async function reviewPlatformPayment(
 
   try {
     if (decision === "validate") {
-      const { alreadyValidated } = validatePlatformPayment({
+      const { alreadyValidated } = await validatePlatformPayment({
         paymentId,
         reviewerUserId: session.user.id,
         note: note || null,
@@ -45,7 +45,7 @@ export async function reviewPlatformPayment(
     if (decision === "reject") {
       if (!note) return { error: "Un motif est obligatoire pour rejeter un règlement." };
 
-      rejectPlatformPayment({ paymentId, reviewerUserId: session.user.id, note });
+      await rejectPlatformPayment({ paymentId, reviewerUserId: session.user.id, note });
       revalidatePath("/admin/reglements");
 
       return { message: "Règlement rejeté." };

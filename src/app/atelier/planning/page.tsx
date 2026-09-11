@@ -79,17 +79,17 @@ export default async function PlanningPage({
       : "active";
   const assignee = params.collaborateur?.trim() || "all";
   const search = params.q?.trim() ?? "";
-  const members = listPlanningMembers(workshop.id);
+  const members = await listPlanningMembers(workshop.id);
   const memberIds = new Set(members.map((member) => member.id));
   const safeAssignee = assignee === "unassigned" || memberIds.has(assignee) ? assignee : "all";
-  const items = listPlanningItems(workshop.id, {
+  const items = await listPlanningItems(workshop.id, {
     search,
     status,
     assignee: safeAssignee,
   });
   const filteredItems = applyQuickFilter(items, quickFilter, today);
   const events = buildEvents(items);
-  const counts = getDashboardCounts(workshop.id);
+  const counts = await getDashboardCounts(workshop.id);
   const listPath = localePath(locale, "/atelier/planning");
   const plainMembers = members.map((member) => ({ ...member }));
 
