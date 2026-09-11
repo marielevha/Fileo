@@ -1,11 +1,12 @@
 # Contexte de travail — Filéo
 
 > Document de reprise. À lire en premier au début d'une nouvelle session.
-> Dernière mise à jour : 10 septembre 2026.
+> Dernière mise à jour : 11 septembre 2026.
 
-**Branche active :** `feature/dashboard-atelier`, basée sur le commit
-`1097264`. Les développements clients, commandes et planning décrits ci-dessous
-sont regroupés dans le commit qui accompagne cette mise à jour.
+**Branche active :** `feature/mongodb-integration`, basée sur le commit `5fedf73`.
+Elle contient la conversion de toute la persistance applicative vers MongoDB
+Atlas, basée sur les fonctionnalités clients, commandes, planning et
+encaissements de `feature/dashboard-atelier`.
 
 ---
 
@@ -65,12 +66,12 @@ Aucun module natif n'est compilable (pas de Build Tools). D'où :
 
 | Besoin | Choix | Pourquoi pas l'usuel |
 | --- | --- | --- |
-| Base de données | `node:sqlite` (intégré Node 22+) | `better-sqlite3` exige node-gyp |
+| Base de données | pilote officiel `mongodb` + Atlas | accès asynchrone, transactions et index natifs |
 | Hachage mot de passe | `scrypt` de `node:crypto` | bcrypt et argon2 sont natifs |
 | Icônes | SVG inline maison (`Icon.tsx`) | évite une dépendance de plus |
 
-`@types/node` doit rester en **`^24`** : les types de `node:sqlite` n'existent
-pas dans la v20.
+`@types/node` reste en **`^24`**, aligné sur la version Node installée et sur
+`process.loadEnvFile()` utilisé pour charger les identifiants Atlas en local.
 
 ---
 
@@ -79,9 +80,10 @@ pas dans la v20.
 ```powershell
 npm.cmd run dev             # http://localhost:3000
 npm.cmd run build           # build de production (accès Google Fonts requis)
-npm.cmd run db:seed         # crée data/fileo.db + jeu de démonstration
-npm.cmd run db:reset        # supprime data/ puis reseed
-npm.cmd run check:money     # formules §8.7 + contraintes de schéma
+npm.cmd run db:seed         # remplace MongoDB/fileo par le jeu de démonstration
+npm.cmd run db:reset        # alias explicite du seed destructif
+npm.cmd run db:migrate:sqlite -- --replace # transfère data/fileo.db vers Atlas
+npm.cmd run check:money     # formules §8.7 + index/contraintes MongoDB
 npm.cmd run check:clients   # CRUD, recherche, tris, pagination, deleted_at
 npm.cmd run check:orders    # pagination de la liste des commandes
 npm.cmd run check:planning  # replanification, affectation, remise, audit
@@ -170,9 +172,9 @@ Erreurs déjà commises et corrigées. Les reproduire coûterait du temps.
   soumettent un `FormData`. Un POST reconstruit à la main sans ces champs ne
   déclenche pas l'action attendue.
 
-- **Après une évolution de schéma en développement, redémarrer `next dev`.**
-  La connexion SQLite survit au rechargement à chaud dans `globalThis`; une
-  nouvelle migration de démarrage ne s'applique donc qu'après réouverture du
+- **Après une évolution des index MongoDB, redémarrer `next dev`.** Le client et
+  la promesse d'initialisation survivent au rechargement à chaud dans
+  `globalThis`; les index de démarrage sont donc recréés après réouverture du
   processus.
 
 - **Ne pas comparer les couleurs en chaînes littérales.** daisyUI émet
@@ -205,7 +207,7 @@ src/
 │  ├─ planning/         filtres, navigation temporelle et éditeur de tâche
 │  └─ ui/               Icon, Reveal, SectionHeading, PageHero, CookieBanner
 └─ lib/
-   ├─ db/               index.ts (connexion) + schema.sql (21 tables)
+   ├─ db/               index.ts (pool Atlas, transactions et index MongoDB)
    ├─ auth/             password.ts, session.ts, guards.ts
    ├─ repos/            clients, orders, planning, payments, dashboard…
    ├─ actions/          auth, clients, planning, admin, contact
@@ -267,7 +269,7 @@ atteignables par le pied de page et par des liens « voir tout ».
 
 ### Fait et vérifié
 
-- **Socle** : 21 tables, permissions transcrites du §4.2, audit, sessions
+- **Socle** : collections MongoDB indexées, permissions transcrites du §4.2, audit, sessions
   (cookie opaque, seul le SHA-256 est stocké), téléphones E.164 CG/CD.
 - **Authentification** : inscription + création d'atelier + abonnement d'essai,
   connexion, déconnexion.
@@ -309,6 +311,10 @@ atteignables par le pied de page et par des liens « voir tout ».
   arrive sur `/admin` au lieu de la route atelier inexistante `/creer-atelier`.
 - **Back-office** : tableau de bord (recettes par devise, jamais mélangées),
   ateliers, validation des règlements avec prolongation d'abonnement (REC-17).
+- **Migration MongoDB** : pilote officiel, pool partagé compatible avec le hot
+  reload Next.js, repositories et actions entièrement asynchrones, transactions
+  Atlas pour les écritures multi-collections, seed MongoDB, scripts de recette
+  adaptés et outil ponctuel `db:migrate:sqlite`.
 
 ### Non fait, par ordre de priorité
 
@@ -325,8 +331,8 @@ atteignables par le pied de page et par des liens « voir tout ».
 5. Photos et pièces jointes (§8.5), reçus et exports (§8.8).
 6. Messages WhatsApp préremplis (§8.10) — `whatsappLink()` existe déjà dans
    `phone.ts`, sans interface.
-7. API de synchronisation mobile (§10). La table `sync_operations` et les
-   colonnes `row_version` existent déjà.
+7. API de synchronisation mobile (§10). La collection `sync_operations` et les
+   champs `row_version` sont prévus par le modèle migré.
 8. Compléter mentions légales, confidentialité et CGV : ce sont des **modèles**
    à faire valider juridiquement (§17.2).
 
@@ -355,9 +361,10 @@ ni le montant dans le HTML. Il vérifie aussi que la page d'encaissement lui
 renvoie 404, ainsi que les routes détail commande et les vues liste/jour/semaine
 du planning pour le responsable et le collaborateur.
 
-Dernière validation complète : TypeScript, ESLint, `check:money`,
-`check:clients`, `check:orders`, `check:planning`, `check:payments`, `check:smoke`
-et build Next.js de production réussis le 10 septembre 2026.
+Validation de la conversion MongoDB : TypeScript, ESLint et vérification
+syntaxique de tous les scripts réussis le 11 septembre 2026. Les recettes HTTP
+et le build étaient intégralement verts avant la conversion. Ils doivent être
+rejoués après alimentation de la base Atlas `fileo`.
 
 Non couverts, car ils exigent des tests d'intégration ou le client mobile :
 REC-08, REC-09, REC-11, REC-14 à REC-16, REC-19 à REC-24.
@@ -366,24 +373,38 @@ REC-08, REC-09, REC-11, REC-14 à REC-16, REC-19 à REC-24.
 
 ## 8. Base de données
 
-SQLite via `node:sqlite`, fichier `data/fileo.db` (gitignoré, recréable par
-`npm run db:seed`).
+MongoDB Atlas via le pilote officiel `mongodb`. La base logique par défaut est
+`fileo` (`MONGODB_DB` permet de la remplacer). `src/lib/db/index.ts` mutualise
+le client dans `globalThis`, configure le pool et crée les index uniques pour
+les identifiants, téléphones, appartenances et clés d'idempotence.
 
-`node:sqlite` est encore marqué **expérimental** en amont. Le cahier prévoit
-PostgreSQL en production (§15.2) : la bascule touche `src/lib/db/` et les
-dépôts, **pas les pages**. Garder cette frontière étanche.
+En local, l'URI est lue depuis `atlas-credentials.env` si `MONGODB_URI` n'est
+pas déjà définie. Ce fichier contient des secrets, est ignoré par Git et ne doit
+jamais être affiché, commité ou poussé. `.env.example` ne contient qu'une URI
+factice.
 
-Conventions du schéma :
+`npm.cmd run db:seed` et `db:reset` **suppriment puis recréent** la base Atlas
+`fileo` avec les comptes et données de démonstration. Ne jamais les exécuter sur
+une base contenant des données à conserver.
 
-- identifiants `TEXT` (UUID) — stables entre appareils pour la synchronisation
-- montants `INTEGER` en unité mineure + colonne devise
-- dates `TEXT` ISO-8601
+La base SQLite historique `data/fileo.db` reste locale comme sauvegarde.
+`npm.cmd run db:migrate:sqlite -- --replace` peut transférer toutes ses tables
+vers les collections Atlas, mais remplace le contenu distant et exporte des
+données potentiellement sensibles. Au 11 septembre 2026, ce transfert n'a pas
+été exécuté : il exige une autorisation explicite après présentation de ce
+risque.
+
+Conventions des documents :
+
+- identifiants UUID sous forme de chaînes — stables entre appareils pour la synchronisation
+- montants entiers en unité mineure + champ devise
+- dates métier sous forme de chaînes ISO-8601
 - `row_version` incrémenté à chaque écriture (préparation des conflits §10.3)
-- `workshop_id` sur chaque table métier
+- `workshop_id` sur chaque document métier
 - `clients.deleted_at` porte la suppression logique des clients
 - `order_items.delivered_at` porte la remise effective, distincte de l'échéance
 - `order_date_changes.order_item_id` rattache une replanification à l'article
-  exact ; les anciennes bases sont migrées au démarrage dans `src/lib/db/index.ts`
+  exact
 
 ---
 
