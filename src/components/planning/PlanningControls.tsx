@@ -48,6 +48,7 @@ export default function PlanningControls({
       if (value) params.set(key, value);
       else params.delete(key);
     }
+    if (!Object.hasOwn(changes, "page")) params.delete("page");
     const queryString = params.toString();
     startTransition(() => {
       router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });

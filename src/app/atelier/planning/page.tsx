@@ -58,6 +58,7 @@ export default async function PlanningPage({
     statut?: string;
     collaborateur?: string;
     filtre?: string;
+    page?: string;
   }>;
 }) {
   const { workshop } = await requireWorkshop("orders.read");
@@ -88,10 +89,20 @@ export default async function PlanningPage({
     assignee: safeAssignee,
   });
   const filteredItems = applyQuickFilter(items, quickFilter, today);
+  const pageSize = 10;
+  const requestedPage = parsePositiveInt(params.page) ?? 1;
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const currentPage = Math.min(requestedPage, pageCount);
+  const pagedItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const events = buildEvents(items);
   const counts = await getDashboardCounts(workshop.id);
   const listPath = localePath(locale, "/atelier/planning");
   const plainMembers = members.map((member) => ({ ...member }));
+  const listQuery = new URLSearchParams();
+  if (search) listQuery.set("q", search);
+  if (status !== "active") listQuery.set("statut", status);
+  if (safeAssignee !== "all") listQuery.set("collaborateur", safeAssignee);
+  if (quickFilter) listQuery.set("filtre", quickFilter);
 
   const periodStart = view === "semaine" ? startOfWeek(selectedDate) : selectedDate;
   const periodEnd = view === "semaine" ? addDays(periodStart, 6) : selectedDate;
@@ -151,11 +162,18 @@ export default async function PlanningPage({
 
       {view === "liste" ? (
         <PlanningList
-          items={filteredItems}
+          items={pagedItems}
           members={plainMembers}
           locale={locale}
           today={today}
           resetHref={listPath}
+          pagination={{
+            total: filteredItems.length,
+            page: currentPage,
+            pageSize,
+            pageCount,
+            href: (page) => pageHref(listPath, listQuery, page),
+          }}
         />
       ) : (
         <CalendarView
@@ -196,12 +214,20 @@ function PlanningList({
   locale,
   today,
   resetHref,
+  pagination,
 }: {
   items: PlanningItem[];
   members: Array<{ id: string; full_name: string }>;
   locale: "fr" | "en" | "lg";
   today: string;
   resetHref: string;
+  pagination: {
+    total: number;
+    page: number;
+    pageSize: number;
+    pageCount: number;
+    href: (page: number) => string;
+  };
 }) {
   if (items.length === 0) {
     return (
@@ -215,7 +241,14 @@ function PlanningList({
   return (
     <div className="overflow-hidden rounded-2xl border border-base-300 bg-base-100">
       <div className="overflow-x-auto">
-        <table className="table">
+        <table className="table table-fixed">
+          <colgroup>
+            <col className="w-[34%]" />
+            <col className="w-[27%]" />
+            <col className="w-[17%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+          </colgroup>
           <thead>
             <tr>
               <th>Article</th>
@@ -229,43 +262,74 @@ function PlanningList({
             {items.map((item) => {
               const late = isLive(item.status) && Boolean(item.effective_due_date) && item.effective_due_date! < today;
               return (
-                <tr key={item.item_id} className="hover:bg-base-200">
-                  <td className="min-w-56">
+                <tr key={item.item_id} className="align-middle hover:bg-base-200/70">
+                  <td className="min-w-72 py-5">
                     <Link
                       href={localePath(locale, `/atelier/commandes/${item.order_id}`)}
-                      className="font-medium transition-colors hover:text-primary"
+                      className="line-clamp-2 font-medium leading-snug transition-colors hover:text-primary"
                     >
                       {item.description}
                     </Link>
-                    <span className="mt-0.5 block text-sm text-base-content/55">
+                    <span className="mt-1 block text-sm leading-snug text-base-content/55">
                       {item.client_name} · {item.reference} · Qté {item.quantity}
                     </span>
                   </td>
-                  <td className="min-w-48 text-sm">
+                  <td className="min-w-64 py-5">
                     <DueDate item={item} late={late} />
                     {item.fitting_date ? (
-                      <span className="mt-1 block text-base-content/60">
+                      <span className="mt-2 block text-sm leading-snug text-base-content/60">
                         Essayage · {formatDate(item.fitting_date, { day: "2-digit", month: "short" })}
                       </span>
                     ) : null}
                     {item.delivered_at ? (
-                      <span className="mt-1 block text-success">
+                      <span className="mt-2 block text-sm leading-snug text-success">
                         Remise · {formatDate(item.delivered_at.slice(0, 10), { day: "2-digit", month: "short" })}
                       </span>
                     ) : null}
                   </td>
-                  <td className="text-sm">
+                  <td className="py-5 text-sm leading-snug">
                     {item.assignee_name ?? <span className="text-base-content/40">Non affecté</span>}
                   </td>
-                  <td><StatusBadge status={item.status} /></td>
-                  <td className="text-right">
-                    <PlanningItemEditor item={{ ...item }} members={members} />
+                  <td className="py-5"><StatusBadge status={item.status} /></td>
+                  <td className="py-5 text-right">
+                    <PlanningItemEditor item={{ ...item }} members={members} compact />
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-col gap-3 border-t border-base-300 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-base-content/55">
+          {pagination.total} tâche{pagination.total > 1 ? "s" : ""} - page {pagination.page} sur {pagination.pageCount}
+        </p>
+        <nav className="join" aria-label="Pagination du planning">
+          <Link
+            href={pagination.href(Math.max(1, pagination.page - 1))}
+            aria-disabled={pagination.page === 1}
+            className={`btn btn-sm join-item ${pagination.page === 1 ? "btn-disabled" : "btn-ghost"}`}
+          >
+            Précédent
+          </Link>
+          {visiblePages(pagination.page, pagination.pageCount).map((page) => (
+            <Link
+              key={page}
+              href={pagination.href(page)}
+              aria-current={page === pagination.page ? "page" : undefined}
+              className={`btn btn-sm join-item ${page === pagination.page ? "btn-active" : "btn-ghost"}`}
+            >
+              {page}
+            </Link>
+          ))}
+          <Link
+            href={pagination.href(Math.min(pagination.pageCount, pagination.page + 1))}
+            aria-disabled={pagination.page === pagination.pageCount}
+            className={`btn btn-sm join-item ${pagination.page === pagination.pageCount ? "btn-disabled" : "btn-ghost"}`}
+          >
+            Suivant
+          </Link>
+        </nav>
       </div>
     </div>
   );
@@ -295,7 +359,7 @@ function CalendarView({
       </h2>
 
       <div className={view === "semaine"
-        ? "grid overflow-hidden rounded-2xl border border-base-300 md:grid-cols-7"
+        ? "grid overflow-x-auto rounded-2xl border border-base-300 grid-cols-[repeat(7,minmax(9rem,1fr))]"
         : "overflow-hidden rounded-2xl border border-base-300"}
       >
         {days.map((day) => {
@@ -304,14 +368,14 @@ function CalendarView({
             <article
               key={day}
               className={view === "semaine"
-                ? "min-h-44 border-b border-r border-base-300 bg-base-100"
+                ? "min-h-56 border-b border-r border-base-300 bg-base-100"
                 : "bg-base-100"}
             >
-              <header className={`border-b border-base-300 px-3 py-2.5 ${day === today ? "bg-primary/10" : "bg-base-200/60"}`}>
-                <p className="text-xs font-semibold uppercase text-base-content/55">
+              <header className={`border-b border-base-300 px-3.5 py-3 ${day === today ? "bg-primary/15" : "bg-base-200/60"}`}>
+                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-base-content/50">
                   {formatDate(day, { weekday: "short" })}
                 </p>
-                <p className={day === today ? "font-bold text-primary" : "font-semibold"}>
+                <p className={`mt-0.5 text-sm font-bold ${day === today ? "text-primary" : "text-base-content/80"}`}>
                   {formatDate(day, { day: "numeric", month: "short" })}
                 </p>
               </header>
@@ -319,23 +383,24 @@ function CalendarView({
               {dayEvents.length === 0 ? (
                 <p className="px-3 py-6 text-center text-xs text-base-content/40">Aucun événement</p>
               ) : (
-                <ul className="divide-y divide-base-300">
+                <ul className="space-y-2 p-2.5">
                   {dayEvents.map((event) => (
-                    <li key={event.id} className="p-3">
-                      <div className="flex items-start gap-2">
+                    <li key={event.id}>
+                      <div className="rounded-lg border border-base-300 bg-base-200/50 p-2.5 transition-colors hover:bg-base-200">
+                        <div className="flex items-start gap-2">
                         <span className="min-w-0 flex-1">
-                          <span className={`badge badge-xs ${EVENT_TONE[event.kind]}`}>{event.label}</span>
+                          <span className={`badge badge-xs w-fit whitespace-nowrap ${EVENT_TONE[event.kind]}`}>{eventLabel(event)}</span>
                           <Link
                             href={localePath(locale, `/atelier/commandes/${event.item.order_id}`)}
-                            className="mt-1.5 block text-sm font-medium leading-snug hover:text-primary"
+                            className="mt-1.5 block line-clamp-2 text-sm font-semibold leading-snug hover:text-primary"
                           >
                             {event.kind === "fitting" ? event.item.reference : event.item.description}
                           </Link>
-                          <span className="mt-0.5 block truncate text-xs text-base-content/55">
+                          <span className="mt-1 block line-clamp-2 text-xs leading-snug text-base-content/55">
                             {event.item.client_name}{event.kind === "fitting" ? "" : ` · ${event.item.reference}`}
                           </span>
                           {event.item.assignee_name ? (
-                            <span className="mt-1 block truncate text-xs text-base-content/60">
+                            <span className="mt-1.5 block truncate text-xs text-base-content/65">
                               {event.item.assignee_name}
                             </span>
                           ) : null}
@@ -343,6 +408,7 @@ function CalendarView({
                         {event.kind === "fitting" ? null : (
                           <PlanningItemEditor item={{ ...event.item }} members={members} compact />
                         )}
+                        </div>
                       </div>
                     </li>
                   ))}
@@ -359,18 +425,32 @@ function CalendarView({
 function DueDate({ item, late }: { item: PlanningItem; late: boolean }) {
   if (!item.effective_due_date) return <span className="text-base-content/40">Sans échéance</span>;
   return (
-    <span className={late ? "font-medium text-error" : "text-base-content/70"}>
-      <span className={`badge badge-xs mr-1.5 ${item.explicit_due_date ? "badge-info" : "badge-warning"}`}>
-        {item.explicit_due_date ? "Échéance" : "Date promise"}
+    <span className="block leading-snug">
+      <span className={late ? "font-semibold text-error" : "text-base-content/75"}>
+        {formatDate(item.effective_due_date, { day: "2-digit", month: "short", year: "numeric" })}
       </span>
-      {late ? "En retard · " : ""}
-      {formatDate(item.effective_due_date, { day: "2-digit", month: "short", year: "numeric" })}
+      {late ? (
+        <span className="mt-1 block text-xs font-semibold uppercase text-error/80">
+          En retard
+        </span>
+      ) : null}
     </span>
   );
 }
 
 function StatusBadge({ status }: { status: ItemStatus }) {
-  return <span className={`badge badge-sm ${STATUS_TONE[status]}`}>{ITEM_STATUS_LABELS[status]}</span>;
+  return (
+    <span className={`badge badge-sm min-w-24 justify-center whitespace-nowrap px-3 ${STATUS_TONE[status]}`}>
+      {ITEM_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+function eventLabel(event: PlanningEvent): string {
+  if (event.kind === "item_due") return "Échéance";
+  if (event.kind === "promised") return "Promise";
+  if (event.kind === "fitting") return "Essayage";
+  return "Remise";
 }
 
 function buildEvents(items: PlanningItem[]): PlanningEvent[] {
@@ -421,6 +501,26 @@ function applyQuickFilter(items: PlanningItem[], filter: QuickFilter, today: str
     return items.filter((item) => isLive(item.status) && Boolean(item.effective_due_date) && item.effective_due_date! < today);
   }
   return items;
+}
+
+function parsePositiveInt(value?: string): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function pageHref(pathname: string, baseParams: URLSearchParams, page: number): string {
+  const params = new URLSearchParams(baseParams);
+  if (page > 1) params.set("page", String(page));
+  else params.delete("page");
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+function visiblePages(current: number, total: number): number[] {
+  const start = Math.max(1, Math.min(current - 1, total - 2));
+  const end = Math.min(total, start + 2);
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }
 
 function isLive(status: ItemStatus) {
