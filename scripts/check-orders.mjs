@@ -19,6 +19,7 @@ try {
   const owner = await db.collection("users").findOne({ phone_e164: "+242061111111" }, { projection: { id: 1 } });
   const membership = await db.collection("memberships").findOne({ user_id: owner.id, status: "active" }, { projection: { workshop_id: 1 } });
   const client = await db.collection("clients").findOne({ workshop_id: membership.workshop_id, deleted_at: null }, { sort: { created_at: 1 }, projection: { id: 1 } });
+  const initialOrderCount = await db.collection("orders").countDocuments({ workshop_id: membership.workshop_id });
 
   const token = randomBytes(32).toString("base64url");
   sessionId = randomUUID();
@@ -53,7 +54,7 @@ try {
   );
   check(
     "compteur et navigation affichés",
-    /13\s+commande\s*s?\s+-\s+page\s+1\s+sur\s+2/.test(visibleText(firstPage.html)) &&
+    new RegExp(`${initialOrderCount + 11}\\s+commande\\s*s?\\s+-\\s+page\\s+1\\s+sur\\s+2`).test(visibleText(firstPage.html)) &&
       firstPage.html.includes("page=2"),
   );
 

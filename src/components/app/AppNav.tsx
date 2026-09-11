@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import Icon from "@/components/ui/Icon";
 
 export type NavItem = {
@@ -19,9 +20,14 @@ export type NavItem = {
  */
 export default function AppNav({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const isActive = (item: NavItem) =>
-    item.exact ? pathname === item.href : pathname.startsWith(item.href);
+    hydrated && (item.exact ? pathname === item.href : pathname.startsWith(item.href));
 
   return (
     <nav aria-label="Sections" className="shrink-0 max-lg:hidden lg:w-56">

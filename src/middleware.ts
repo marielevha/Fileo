@@ -15,6 +15,11 @@ function preferredLocale(request: NextRequest) {
 export function middleware(request: NextRequest) {
   const segments = request.nextUrl.pathname.split("/").filter(Boolean);
   const locale = isLocale(segments[0]) ? segments[0] : undefined;
+  const forwardedLocale = request.headers.get("x-fileo-locale") ?? undefined;
+
+  if (!locale && isLocale(forwardedLocale)) {
+    return NextResponse.next();
+  }
 
   if (!locale) {
     const url = request.nextUrl.clone();

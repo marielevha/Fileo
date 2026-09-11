@@ -10,6 +10,60 @@ encaissements de `feature/dashboard-atelier`.
 
 ---
 
+## Mise a jour Codex - 11 septembre 2026
+
+Travail realise dans cette session :
+
+- Toutes les branches distantes ont ete recuperees, puis la branche la plus
+  recente a ete activee : `feature/mongodb-integration`.
+- `atlas-credentials.env` a ete ajoute localement par l'utilisateur et reste
+  ignore par Git via `.gitignore`.
+- La connexion MongoDB Atlas a ete deboguee : le blocage reseau/TLS venait de
+  l'IP Atlas non autorisee, puis un second echec venait d'un utilisateur/URI
+  Mongo invalide. Apres creation du nouvel utilisateur Atlas, `MONGODB_PING=ok`.
+- La boucle middleware i18n a ete corrigee dans `src/middleware.ts` : une
+  requete deja rewrittee avec `x-fileo-locale` n'est plus redirigee vers la
+  route localisee, ce qui evitait le chargement infini entre `/` et `/fr`.
+- Le warning React d'hydratation dans `AppNav` a ete corrige :
+  `usePathname()` voyait parfois `/admin` cote serveur et `/fr/admin` cote
+  client. L'etat actif de navigation est maintenant applique seulement apres
+  hydratation client.
+- La migration SQLite vers MongoDB a ete executee avec `--replace`, puis le
+  seed MongoDB enrichi a ete execute. Le seed remplace volontairement la base
+  `fileo`.
+- `scripts/seed.mjs` cree maintenant un jeu de demo plus dense : 6 users,
+  2 ateliers, 5 memberships, 3 offres, 2 abonnements, 12 clients, 4 releves de
+  mesures, 8 commandes, 10 lignes de commande, 10 mouvements financiers,
+  1 changement de date, 2 reglements plateforme, 2 tickets, 2 entrees d'audit
+  et 12 contenus publics.
+- `scripts/check-orders.mjs` calcule maintenant le nombre initial de commandes
+  au lieu de supposer l'ancien seed minimal, afin que le test reste compatible
+  avec un jeu de donnees enrichi.
+
+Validations executees apres seed :
+
+```powershell
+.\.tools\node\node.exe scripts\check-money.mjs
+.\.tools\node\node.exe scripts\smoke.mjs
+.\.tools\node\node.exe scripts\check-clients.mjs
+.\.tools\node\node.exe scripts\check-orders.mjs
+.\.tools\node\node.exe scripts\check-planning.mjs
+.\.tools\node\node.exe scripts\check-payments.mjs
+.\.tools\node\npx.cmd tsc --noEmit --pretty false
+```
+
+Resultat : tous les checks sont passes. Le serveur local repond en `200` sur
+`http://127.0.0.1:3000/fr`.
+
+Pour demarrer le serveur depuis PowerShell si `node` n'est pas dans le `PATH` :
+
+```powershell
+$env:Path = "C:\Users\mabir\Music\maeva\clover\.tools\node;$env:Path"
+.\.tools\node\npm.cmd run dev
+```
+
+---
+
 ## 1. Ce qu'est ce projet
 
 **Filéo** — solution de gestion pour ateliers de couture (clients, mesures,
