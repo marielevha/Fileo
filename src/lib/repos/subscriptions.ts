@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ClientSession } from "mongodb";
 import { recordAudit } from "@/lib/audit";
-import { collection, newId, withTransaction } from "@/lib/db";
+import { collection, newId, nowIso, withTransaction } from "@/lib/db";
 import { parseLimits, type PlanLimits, type PlanRow } from "@/lib/repos/contents";
 import { money, type CurrencyCode, type Money } from "@/lib/money";
 
@@ -37,7 +37,8 @@ export type SubscriptionRow = {
   updated_at: string;
 };
 
-export type PlatformPaymentStatus = "declared" | "validated" | "rejected";
+export type PlatformPaymentStatus = "declared" | "provider_pending" | "validated" | "rejected";
+export type SubscriptionPaymentProvider = "manual" | "mtn_momo";
 
 export type WorkshopPaymentRow = {
   id: string;
@@ -46,6 +47,9 @@ export type WorkshopPaymentRow = {
   amount: number;
   currency: string;
   channel: string;
+  provider: SubscriptionPaymentProvider;
+  provider_status: string | null;
+  provider_reference_id: string | null;
   external_reference: string | null;
   status: PlatformPaymentStatus;
   declared_at: string;
@@ -136,7 +140,7 @@ export async function declareManualSubscriptionPayment(input: {
       {
         workshop_id: input.workshopId,
         plan_id: plan.id,
-        status: "declared",
+        status: { $in: ["declared", "provider_pending"] },
       },
       { projection: { id: 1 }, session },
     );
@@ -156,6 +160,9 @@ export async function declareManualSubscriptionPayment(input: {
       amount: input.amount.amount,
       currency: input.amount.currency,
       channel: input.channel,
+      provider: "manual",
+      provider_status: null,
+      provider_reference_id: null,
       external_reference: input.externalReference.trim(),
       status: "declared",
       idempotency_key: input.idempotencyKey,
@@ -180,6 +187,189 @@ export async function declareManualSubscriptionPayment(input: {
 
     return id;
   });
+}
+
+export async function createProviderSubscriptionPayment(input: {
+  workshopId: string;
+  actorUserId: string;
+  planId: string;
+  amount: Money;
+  provider: Exclude<SubscriptionPaymentProvider, "manual">;
+  providerReferenceId: string;
+  providerAmount: string;
+  providerCurrency: string;
+  externalId: string;
+  payerPhoneE164: string;
+  payerMsisdn: string;
+  idempotencyKey: string;
+}): Promise<{ paymentId: string; providerReferenceId: string; externalId: string }> {
+  return withTransaction(async (session) => {
+    const subscriptions = await collection("subscriptions");
+    const payments = await collection("platform_payments");
+    const plans = await collection("plans");
+    const subscription = await subscriptions.findOne(
+      { workshop_id: input.workshopId, status: { $in: ["trial", "active", "renewal_due"] } },
+      { sort: { current_period_end: -1, created_at: -1 }, session },
+    );
+    if (!subscription) throw new SubscriptionError("Aucun abonnement actif ou en essai n'est associé à cet atelier.");
+    const plan = await plans.findOne(
+      { id: input.planId, archived_at: null },
+      { projection: { id: 1, currency: 1, price_amount: 1, label: 1 }, session },
+    );
+    if (!plan) throw new SubscriptionError("Offre introuvable.");
+    if (plan.currency !== input.amount.currency) {
+      throw new SubscriptionError(`Devise incompatible : l'offre est en ${plan.currency}.`);
+    }
+
+    const pendingForPlan = await payments.findOne(
+      {
+        workshop_id: input.workshopId,
+        plan_id: plan.id,
+        status: { $in: ["declared", "provider_pending"] },
+      },
+      { projection: { id: 1 }, session },
+    );
+    if (pendingForPlan) {
+      throw new SubscriptionError("Un paiement est déjà en attente de validation pour cette offre.");
+    }
+
+    const existing = await payments.findOne({ idempotency_key: input.idempotencyKey }, { session });
+    if (existing) {
+      return {
+        paymentId: String(existing.id),
+        providerReferenceId: String(existing.provider_reference_id ?? input.providerReferenceId),
+        externalId: String(existing.external_id ?? input.externalId),
+      };
+    }
+
+    const id = newId();
+    await payments.insertOne({
+      id,
+      workshop_id: input.workshopId,
+      subscription_id: subscription.id,
+      plan_id: plan.id,
+      amount: input.amount.amount,
+      currency: input.amount.currency,
+      channel: input.provider,
+      provider: input.provider,
+      provider_status: "INITIATED",
+      provider_reference_id: input.providerReferenceId,
+      provider_amount: input.providerAmount,
+      provider_currency: input.providerCurrency,
+      provider_checked_at: null,
+      provider_payload: null,
+      external_id: input.externalId,
+      external_reference: input.providerReferenceId,
+      payer_phone: input.payerPhoneE164,
+      payer_msisdn: input.payerMsisdn,
+      status: "provider_pending",
+      idempotency_key: input.idempotencyKey,
+      declared_at: new Date().toISOString().slice(0, 10),
+      reviewed_at: null,
+      reviewed_by: null,
+      review_note: null,
+    }, { session });
+    await recordAudit({
+      workshopId: input.workshopId,
+      actorUserId: input.actorUserId,
+      action: "platform_payment.declare",
+      entityKind: "platform_payment",
+      entityId: id,
+      after: {
+        planId: plan.id,
+        amount: input.amount.amount,
+        currency: input.amount.currency,
+        provider: input.provider,
+      },
+    }, session);
+
+    return { paymentId: id, providerReferenceId: input.providerReferenceId, externalId: input.externalId };
+  });
+}
+
+export async function markProviderPaymentRequested(input: {
+  paymentId: string;
+  workshopId: string;
+  providerStatus: string;
+}): Promise<void> {
+  const payments = await collection("platform_payments");
+  await payments.updateOne(
+    { id: input.paymentId, workshop_id: input.workshopId, status: "provider_pending" },
+    {
+      $set: {
+        provider_status: input.providerStatus,
+        provider_checked_at: nowIso(),
+      },
+    },
+  );
+}
+
+export async function markProviderPaymentFailed(input: {
+  paymentId: string;
+  workshopId: string;
+  reason: string;
+  providerStatus?: string;
+  payload?: unknown;
+}): Promise<void> {
+  const payments = await collection("platform_payments");
+  await payments.updateOne(
+    { id: input.paymentId, workshop_id: input.workshopId, status: "provider_pending" },
+    {
+      $set: {
+        status: "rejected",
+        provider_status: input.providerStatus ?? "FAILED",
+        provider_checked_at: nowIso(),
+        provider_payload: input.payload ?? null,
+        reviewed_at: nowIso(),
+        review_note: input.reason,
+      },
+    },
+  );
+}
+
+export async function getProviderPaymentForCheck(input: {
+  paymentId: string;
+  workshopId: string;
+  provider: Exclude<SubscriptionPaymentProvider, "manual">;
+}): Promise<{
+  id: string;
+  provider_reference_id: string;
+  status: PlatformPaymentStatus;
+} | null> {
+  const payments = await collection("platform_payments");
+  const payment = await payments.findOne(
+    {
+      id: input.paymentId,
+      workshop_id: input.workshopId,
+      provider: input.provider,
+    },
+    { projection: { _id: 0, id: 1, provider_reference_id: 1, status: 1 } },
+  );
+  if (!payment?.provider_reference_id) return null;
+  return {
+    id: String(payment.id),
+    provider_reference_id: String(payment.provider_reference_id),
+    status: payment.status as PlatformPaymentStatus,
+  };
+}
+
+export async function recordProviderPaymentStatus(input: {
+  paymentId: string;
+  workshopId: string;
+  providerStatus: string;
+  payload: unknown;
+}): Promise<void> {
+  const payments = await collection("platform_payments");
+  await payments.updateOne(
+    { id: input.paymentId, workshop_id: input.workshopId },
+    {
+      $set: {
+        provider_status: input.providerStatus,
+        provider_checked_at: nowIso(),
+        provider_payload: input.payload,
+      },
+    },
+  );
 }
 
 export class SubscriptionError extends Error {

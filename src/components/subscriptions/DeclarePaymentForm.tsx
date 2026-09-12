@@ -3,11 +3,15 @@
 import { useActionState, useEffect, useState } from "react";
 import Icon from "@/components/ui/Icon";
 import {
+  checkMomoSubscriptionPaymentAction,
   declareSubscriptionPaymentAction,
+  startMomoSubscriptionPaymentAction,
+  type MomoPaymentState,
   type SubscriptionPaymentState,
 } from "@/lib/actions/subscriptions";
 
-const initial: SubscriptionPaymentState = {};
+const initialManual: SubscriptionPaymentState = {};
+const initialMomo: MomoPaymentState = {};
 const PAYMENT_CHANNELS = [
   ["mobile_money", "MTN MoMo"],
   ["airtel_money", "Airtel Money"],
@@ -37,20 +41,40 @@ export default function DeclarePaymentForm({
   today: string;
   idempotencyKey: string;
 }) {
-  const [state, action, pending] = useActionState(declareSubscriptionPaymentAction, initial);
+  const [manualState, manualAction, manualPending] = useActionState(declareSubscriptionPaymentAction, initialManual);
+  const [momoState, momoAction, momoPending] = useActionState(startMomoSubscriptionPaymentAction, initialMomo);
+  const [checkState, checkAction, checkPending] = useActionState(checkMomoSubscriptionPaymentAction, initialMomo);
+  const [mode, setMode] = useState<"momo" | "manual">("momo");
   const [modal, setModal] = useState<null | { kind: "success" | "error"; message: string }>(null);
   const firstPlan = plans.find((plan) => plan.current) ?? plans[0];
   const [selectedPlanId, setSelectedPlanId] = useState(firstPlan?.id ?? "");
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? firstPlan;
   const [amount, setAmount] = useState(selectedPlan?.amount ?? "");
+  const activeMomoPaymentId = checkState.paymentId ?? momoState.paymentId;
 
   useEffect(() => {
-    if (state.ok) {
+    if (manualState.ok) {
       setModal({ kind: "success", message: "Paiement déclaré. Il sera validé par l'équipe Filéo." });
-    } else if (state.error) {
-      setModal({ kind: "error", message: state.error });
+    } else if (manualState.error) {
+      setModal({ kind: "error", message: manualState.error });
     }
-  }, [state.ok, state.error]);
+  }, [manualState.ok, manualState.error]);
+
+  useEffect(() => {
+    if (momoState.message) {
+      setModal({ kind: "success", message: momoState.message });
+    } else if (momoState.error) {
+      setModal({ kind: "error", message: momoState.error });
+    }
+  }, [momoState.message, momoState.error]);
+
+  useEffect(() => {
+    if (checkState.message) {
+      setModal({ kind: "success", message: checkState.message });
+    } else if (checkState.error) {
+      setModal({ kind: "error", message: checkState.error });
+    }
+  }, [checkState.message, checkState.error]);
 
   function updatePlan(nextPlanId: string) {
     const nextPlan = plans.find((plan) => plan.id === nextPlanId);
@@ -59,54 +83,100 @@ export default function DeclarePaymentForm({
   }
 
   return (
-    <form action={action} className="space-y-5">
-      <input type="hidden" name="planId" value={selectedPlan?.id ?? ""} />
-      <input type="hidden" name="currency" value={currency} />
-      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
-
-      <label className="block">
-        <span className="label-text mb-2.5 block text-xs font-medium">Offre</span>
-        <select
-          value={selectedPlan?.id ?? ""}
-          onChange={(event) => updatePlan(event.target.value)}
-          className="select select-bordered select-sm w-full"
-          required
+    <div className="space-y-5">
+      <div className="join grid grid-cols-2">
+        <button
+          type="button"
+          className={`btn join-item btn-sm ${mode === "momo" ? "btn-primary" : "btn-outline"}`}
+          onClick={() => setMode("momo")}
         >
-          {plans.map((plan) => (
-            <option key={plan.id} value={plan.id}>
-              {plan.label} - {plan.priceLabel}
-            </option>
-          ))}
-        </select>
-      </label>
+          MTN MoMo
+        </button>
+        <button
+          type="button"
+          className={`btn join-item btn-sm ${mode === "manual" ? "btn-primary" : "btn-outline"}`}
+          onClick={() => setMode("manual")}
+        >
+          Manuel
+        </button>
+      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <PlanAndAmountFields
+        plans={plans}
+        selectedPlan={selectedPlan}
+        selectedPlanId={selectedPlanId}
+        amount={amount}
+        onPlanChange={updatePlan}
+        onAmountChange={setAmount}
+      />
+
+      <form action={momoAction} className={mode === "momo" ? "space-y-5" : "hidden"}>
+        <input type="hidden" name="planId" value={selectedPlan?.id ?? ""} />
+        <input type="hidden" name="currency" value={currency} />
+        <input type="hidden" name="amount" value={amount} />
+        <input type="hidden" name="idempotencyKey" value={`${idempotencyKey}-momo`} />
+
         <label className="block">
-          <span className="label-text mb-2.5 block text-xs font-medium">Montant payé</span>
+          <span className="label-text mb-2.5 block text-xs font-medium">Numéro MTN MoMo</span>
           <input
-            name="amount"
-            type="text"
-            inputMode="decimal"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
+            name="payerPhone"
+            type="tel"
             className="input input-bordered input-sm w-full"
+            placeholder="Ex. 06 123 45 67"
             required
           />
         </label>
 
-        <label className="block">
-          <span className="label-text mb-2.5 block text-xs font-medium">Moyen</span>
-          <select name="channel" defaultValue="mobile_money" className="select select-bordered select-sm w-full">
-            {PAYMENT_CHANNELS.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+        <button type="submit" className="btn btn-primary btn-sm w-full gap-2" disabled={momoPending}>
+          {momoPending ? <span className="loading loading-spinner loading-xs" /> : <Icon name="phone" className="h-4 w-4" />}
+          Payer avec MTN MoMo
+        </button>
+      </form>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {activeMomoPaymentId ? (
+        <form action={checkAction} className={mode === "momo" ? "space-y-3" : "hidden"}>
+          <input type="hidden" name="paymentId" value={activeMomoPaymentId} />
+          <button type="submit" className="btn btn-outline btn-sm w-full gap-2" disabled={checkPending}>
+            {checkPending ? <span className="loading loading-spinner loading-xs" /> : <Icon name="clock" className="h-4 w-4" />}
+            Vérifier le paiement
+          </button>
+          <p className="text-xs text-base-content/55">
+            Après confirmation sur le téléphone, vérifiez le statut pour activer ou planifier l&apos;abonnement.
+          </p>
+        </form>
+      ) : null}
+
+      <form action={manualAction} className={mode === "manual" ? "space-y-5" : "hidden"}>
+        <input type="hidden" name="planId" value={selectedPlan?.id ?? ""} />
+        <input type="hidden" name="currency" value={currency} />
+        <input type="hidden" name="amount" value={amount} />
+        <input type="hidden" name="idempotencyKey" value={`${idempotencyKey}-manual`} />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="label-text mb-2.5 block text-xs font-medium">Moyen</span>
+            <select name="channel" defaultValue="mobile_money" className="select select-bordered select-sm w-full">
+              {PAYMENT_CHANNELS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="label-text mb-2.5 block text-xs font-medium">Date</span>
+            <input
+              name="declaredAt"
+              type="date"
+              defaultValue={today}
+              max={today}
+              className="input input-bordered input-sm w-full"
+              required
+            />
+          </label>
+        </div>
+
         <label className="block">
           <span className="label-text mb-2.5 block text-xs font-medium">Référence transaction</span>
           <input
@@ -120,35 +190,21 @@ export default function DeclarePaymentForm({
         </label>
 
         <label className="block">
-          <span className="label-text mb-2.5 block text-xs font-medium">Date</span>
+          <span className="label-text mb-2.5 block text-xs font-medium">Note</span>
           <input
-            name="declaredAt"
-            type="date"
-            defaultValue={today}
-            max={today}
+            name="note"
+            type="text"
+            maxLength={240}
             className="input input-bordered input-sm w-full"
-            required
+            placeholder="Nom payeur, numéro utilisé..."
           />
         </label>
-      </div>
 
-      <label className="block">
-        <span className="label-text mb-2.5 block text-xs font-medium">Note</span>
-        <input
-          name="note"
-          type="text"
-          maxLength={240}
-          className="input input-bordered input-sm w-full"
-          placeholder="Nom payeur, numéro utilisé..."
-        />
-      </label>
-
-      <div className="pt-1">
-        <button type="submit" className="btn btn-primary btn-sm w-full gap-2" disabled={pending}>
-          {pending ? <span className="loading loading-spinner loading-xs" /> : <Icon name="check" className="h-4 w-4" />}
+        <button type="submit" className="btn btn-primary btn-sm w-full gap-2" disabled={manualPending}>
+          {manualPending ? <span className="loading loading-spinner loading-xs" /> : <Icon name="check" className="h-4 w-4" />}
           Déclarer le paiement
         </button>
-      </div>
+      </form>
 
       {modal ? (
         <SubscriptionPaymentModal
@@ -157,7 +213,56 @@ export default function DeclarePaymentForm({
           onClose={() => setModal(null)}
         />
       ) : null}
-    </form>
+    </div>
+  );
+}
+
+function PlanAndAmountFields({
+  plans,
+  selectedPlan,
+  selectedPlanId,
+  amount,
+  onPlanChange,
+  onAmountChange,
+}: {
+  plans: PaymentPlanOption[];
+  selectedPlan: PaymentPlanOption | undefined;
+  selectedPlanId: string;
+  amount: string;
+  onPlanChange: (planId: string) => void;
+  onAmountChange: (amount: string) => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <label className="block">
+        <span className="label-text mb-2.5 block text-xs font-medium">Offre</span>
+        <select
+          value={selectedPlan?.id ?? selectedPlanId}
+          onChange={(event) => onPlanChange(event.target.value)}
+          className="select select-bordered select-sm w-full"
+          required
+        >
+          {plans.map((plan) => (
+            <option key={plan.id} value={plan.id}>
+              {plan.label} - {plan.priceLabel}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block">
+        <span className="label-text mb-2.5 block text-xs font-medium">Montant payé</span>
+        <input
+          name="amountDisplay"
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(event) => onAmountChange(event.target.value)}
+          className="input input-bordered input-sm w-full"
+          required
+        />
+      </label>
+    </div>
   );
 }
 
@@ -180,7 +285,7 @@ function SubscriptionPaymentModal({
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-lg font-bold">
-              {success ? "Paiement déclaré" : "Action impossible"}
+              {success ? "Paiement traité" : "Action impossible"}
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-base-content/70">{message}</p>
           </div>

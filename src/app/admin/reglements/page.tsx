@@ -12,18 +12,22 @@ export const metadata: Metadata = {
 
 const CHANNEL_LABELS: Record<string, string> = {
   mobile_money: "Mobile money",
+  mtn_momo: "MTN MoMo API",
   cash: "Espèces",
   transfer: "Virement",
+  airtel_money: "Airtel Money",
 };
 
 const STATUS_TONE: Record<string, string> = {
   declared: "badge-warning",
+  provider_pending: "badge-info",
   validated: "badge-success",
   rejected: "badge-error",
 };
 
 const STATUS_LABELS: Record<string, string> = {
   declared: "À valider",
+  provider_pending: "En attente provider",
   validated: "Validé",
   rejected: "Rejeté",
 };
@@ -52,6 +56,7 @@ export default async function AdminPaymentsPage({
       <nav className="mb-6 flex flex-wrap gap-2">
         {[
           { label: "À valider", value: "declared" },
+          { label: "En attente provider", value: "provider_pending" },
           { label: "Validés", value: "validated" },
           { label: "Rejetés", value: "rejected" },
           { label: "Tous", value: undefined },
@@ -95,7 +100,14 @@ export default async function AdminPaymentsPage({
                   </p>
                   {payment.status === "declared" && payment.projected_period_end ? (
                     <p className="alert alert-info mt-3 py-3 text-sm">
-                      Validation = abonnement prolongé jusqu&apos;au{" "}
+                      Validation = période planifiée
+                      {payment.projected_period_start ? (
+                        <>
+                          {" du "}
+                          {new Date(`${payment.projected_period_start}T00:00:00`).toLocaleDateString("fr-FR")}
+                        </>
+                      ) : null}
+                      {" jusqu'au "}
                       {new Date(`${payment.projected_period_end}T00:00:00`).toLocaleDateString("fr-FR")}.
                     </p>
                   ) : null}
@@ -110,7 +122,7 @@ export default async function AdminPaymentsPage({
                   <p className="font-display text-xl font-extrabold">
                     {formatMoney(money(payment.amount, payment.currency as CurrencyCode))}
                   </p>
-                  <span className={`badge badge-sm mt-1.5 ${STATUS_TONE[payment.status]}`}>
+                  <span className={`badge badge-sm mt-1.5 ${STATUS_TONE[payment.status] ?? "badge-ghost"}`}>
                     {STATUS_LABELS[payment.status] ?? payment.status}
                   </span>
                 </div>

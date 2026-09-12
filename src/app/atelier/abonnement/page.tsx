@@ -32,14 +32,21 @@ const STATUS_LABELS: Record<SubscriptionStatus, string> = {
 
 const PAYMENT_STATUS_LABELS: Record<PlatformPaymentStatus, string> = {
   declared: "À valider",
+  provider_pending: "En attente",
   validated: "Validé",
   rejected: "Rejeté",
 };
 
 const PAYMENT_STATUS_TONE: Record<PlatformPaymentStatus, string> = {
   declared: "badge-warning",
+  provider_pending: "badge-info",
   validated: "badge-success",
   rejected: "badge-error",
+};
+
+const CHANNEL_LABELS: Record<string, string> = {
+  ...PAYMENT_CHANNEL_LABELS,
+  mtn_momo: "MTN MoMo API",
 };
 
 export default async function SubscriptionPage() {
@@ -277,7 +284,7 @@ function PaymentsHistory({
                     </span>
                   </td>
                   <td className="py-4 text-sm text-base-content/70">
-                    {PAYMENT_CHANNEL_LABELS[payment.channel as keyof typeof PAYMENT_CHANNEL_LABELS] ?? payment.channel}
+                    {CHANNEL_LABELS[payment.channel] ?? payment.channel}
                   </td>
                   <td className="py-4 text-sm text-base-content/70">
                     {payment.external_reference ?? "Sans référence"}
