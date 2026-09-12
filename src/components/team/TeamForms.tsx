@@ -65,7 +65,7 @@ export function AddMemberForm({
         {usageLabel}
       </p>
       {state.error ? <p className="alert alert-error mt-4 py-3 text-sm">{state.error}</p> : null}
-      {state.ok ? <p className="alert alert-success mt-4 py-3 text-sm">Membre ajouté à l'équipe.</p> : null}
+      {state.ok ? <p className="alert alert-success mt-4 py-3 text-sm">Membre ajouté à l&apos;équipe.</p> : null}
     </form>
   );
 }

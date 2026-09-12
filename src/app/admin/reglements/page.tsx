@@ -86,6 +86,19 @@ export default async function AdminPaymentsPage({
                     {" · déclaré le "}
                     {new Date(payment.declared_at).toLocaleDateString("fr-FR")}
                   </p>
+                  <p className="text-base-content/60 mt-2 text-sm">
+                    Offre :{" "}
+                    <span className="font-medium text-base-content">
+                      {payment.plan_label ?? "Offre historique"}
+                    </span>
+                    {payment.plan_period_months ? ` · ${payment.plan_period_months} mois` : ""}
+                  </p>
+                  {payment.status === "declared" && payment.projected_period_end ? (
+                    <p className="alert alert-info mt-3 py-3 text-sm">
+                      Validation = abonnement prolongé jusqu&apos;au{" "}
+                      {new Date(`${payment.projected_period_end}T00:00:00`).toLocaleDateString("fr-FR")}.
+                    </p>
+                  ) : null}
                   {payment.review_note ? (
                     <p className="text-base-content/60 mt-2 text-sm italic">
                       Note : {payment.review_note}
@@ -103,9 +116,7 @@ export default async function AdminPaymentsPage({
                 </div>
               </div>
 
-              {payment.status === "declared" ? (
-                <ReviewButtons paymentId={payment.id} />
-              ) : null}
+              <ReviewButtons paymentId={payment.id} canReview={payment.status === "declared"} />
             </li>
           ))}
         </ul>

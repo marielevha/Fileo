@@ -100,7 +100,7 @@ export default async function TeamPage({
       {members.length === 0 ? (
         <div className="rounded-2xl border border-base-300 bg-base-100 px-6 py-12 text-center">
           <p className="font-medium">Aucun membre ne correspond à ces filtres.</p>
-          <Link href={teamPath} className="btn btn-ghost btn-sm mt-4">Réinitialiser l'équipe</Link>
+          <Link href={teamPath} className="btn btn-ghost btn-sm mt-4">Réinitialiser l&apos;équipe</Link>
         </div>
       ) : (
         <TeamTable

@@ -10,6 +10,56 @@ encaissements de `feature/dashboard-atelier`.
 
 ---
 
+## Mise a jour Codex - 12 septembre 2026
+
+Branche active au moment du commit : `feature/abonnement-atelier`.
+
+Travail realise dans cette session :
+
+- Dashboard atelier : finalisation des modules **planning**, **paiements**,
+  **equipe** et **abonnement**, avec interfaces inspirees du planning.
+- Planning : table liste nettoyee, colonne planification simplifiee, retard
+  colore, pagination en mode liste et vue semaine reprise pour une lecture plus
+  compacte.
+- Paiements atelier : page dediee avec indicateurs, liste paginee, filtres et
+  actions coherentes avec le dashboard.
+- Equipe atelier : table reconstruite, pagination, actions regroupees, switch
+  actif/inactif, retrait avec confirmation, icone corbeille, limites
+  d'abonnement appliquees lors de l'ajout/reactivation.
+- Abonnement atelier : page `/atelier/abonnement`, formulaire unique de
+  declaration de paiement manuel avec choix de l'offre, modales de succes et
+  d'erreur, prevention des references deja soumises et des paiements multiples
+  en attente sur une meme offre.
+- Back-office reglements : validation/rejet avec modale de confirmation puis
+  modale de resultat. La liste se rafraichit seulement apres fermeture de la
+  modale de succes.
+- File d'abonnement : chaque reglement valide porte maintenant une periode
+  `access_period_start` / `access_period_end`. Une offre superieure validee
+  n'ecrase plus l'offre courante si des echeances d'une offre precedente sont
+  encore actives. L'offre courante est calculee a partir de la periode qui
+  couvre la date du jour.
+- Atelier Elegance (demo) a ete corrige localement apres les tests manuels :
+  les echeances Fileo Essentiel courent jusqu'au 2026-12-12, puis les periodes
+  Fileo Pro sont planifiees ensuite.
+- Les limites du module equipe utilisent la meme notion d'offre courante que
+  la page abonnement.
+- Le formulaire abonnement a ete aere : espacement augmente entre les labels
+  (`Montant paye`, `Moyen`, etc.) et les champs.
+- Ajout du script `npm.cmd run check:subscriptions` pour tester la declaration
+  manuelle, l'audit, la persistance et le refus de doublon de reference.
+
+Validations executees :
+
+```powershell
+.\.tools\node\npx.cmd tsc --noEmit --pretty false
+.\.tools\node\npm.cmd run lint
+.\.tools\node\npm.cmd run check:subscriptions
+```
+
+Resultat : TypeScript, ESLint et le scenario abonnement sont verts.
+
+---
+
 ## Mise a jour Codex - 11 septembre 2026
 
 Travail realise dans cette session :

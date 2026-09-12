@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { ClientSession } from "mongodb";
 import { recordAudit } from "@/lib/audit";
 import { collection, newId, nowIso, withTransaction } from "@/lib/db";
 import { money, type CurrencyCode, type Money } from "@/lib/money";
@@ -45,18 +46,58 @@ export async function listWorkshops(search = ""): Promise<WorkshopAdminRow[]> {
   ]).toArray();
 }
 
-export type PlatformPaymentRow = { id: string; workshop_id: string; workshop_name: string; subscription_id: string; amount: number; currency: string; channel: string; external_reference: string | null; status: string; declared_at: string; review_note: string | null };
+export type PlatformPaymentRow = {
+  id: string;
+  workshop_id: string;
+  workshop_name: string;
+  subscription_id: string;
+  plan_id: string | null;
+  plan_label: string | null;
+  plan_period_months: number | null;
+  subscription_current_period_end: string | null;
+  projected_period_start: string | null;
+  projected_period_end: string | null;
+  amount: number;
+  currency: string;
+  channel: string;
+  external_reference: string | null;
+  status: string;
+  declared_at: string;
+  review_note: string | null;
+};
 export async function listPlatformPayments(status?: string): Promise<PlatformPaymentRow[]> {
   const payments = await collection("platform_payments");
-  return payments.aggregate<PlatformPaymentRow>([
+  const rows = await payments.aggregate<PlatformPaymentRow>([
     { $match: status ? { status } : {} }, { $sort: { declared_at: -1 } }, { $limit: 200 },
     { $lookup: { from: "workshops", localField: "workshop_id", foreignField: "id", as: "workshop" } },
-    { $set: { workshop_name: { $ifNull: [{ $first: "$workshop.name" }, "Atelier inconnu"] } } },
-    { $project: { _id: 0, workshop: 0 } },
+    { $lookup: { from: "subscriptions", localField: "subscription_id", foreignField: "id", as: "subscription" } },
+    { $set: { subscription_row: { $first: "$subscription" } } },
+    { $set: { effective_plan_id: { $ifNull: ["$plan_id", "$subscription_row.plan_id"] } } },
+    { $lookup: { from: "plans", localField: "effective_plan_id", foreignField: "id", as: "plan" } },
+    { $set: {
+      plan_row: { $first: "$plan" },
+      workshop_name: { $ifNull: [{ $first: "$workshop.name" }, "Atelier inconnu"] },
+      plan_id: "$effective_plan_id",
+      subscription_current_period_end: { $ifNull: ["$subscription_row.current_period_end", null] },
+    } },
+    { $set: {
+      plan_label: { $ifNull: ["$plan_row.label", null] },
+      plan_period_months: { $ifNull: ["$plan_row.period_months", null] },
+    } },
+    { $project: { _id: 0, workshop: 0, subscription: 0, subscription_row: 0, plan: 0, plan_row: 0, effective_plan_id: 0 } },
   ]).toArray();
+  return Promise.all(rows.map(async (row) => {
+    if (!row.plan_period_months) return { ...row, projected_period_start: null, projected_period_end: null };
+    const base = await nextPaymentPeriodStart(row.workshop_id, row.subscription_current_period_end);
+    return {
+      ...row,
+      projected_period_start: base,
+      projected_period_end: addMonths(base, row.plan_period_months),
+    };
+  }));
 }
 
-export async function validatePlatformPayment(params: { paymentId: string; reviewerUserId: string; note?: string | null }): Promise<{ alreadyValidated: boolean }> {
+export async function validatePlatformPayment(params: { paymentId: string; reviewerUserId: string; note?: string | null }): Promise<{ alreadyValidated: boolean; scheduledForLater?: boolean }> {
   return withTransaction(async (session) => {
     const payments = await collection("platform_payments"); const subscriptions = await collection("subscriptions"); const plans = await collection("plans");
     const payment = await payments.findOne({ id: params.paymentId }, { session });
@@ -64,20 +105,33 @@ export async function validatePlatformPayment(params: { paymentId: string; revie
     if (payment.status === "validated") return { alreadyValidated: true };
     const subscription = await subscriptions.findOne({ id: payment.subscription_id }, { session });
     if (!subscription) throw new Error("Abonnement introuvable.");
-    const plan = await plans.findOne({ id: subscription.plan_id }, { projection: { period_months: 1 }, session });
-    const today = new Date();
-    const currentEnd = subscription.current_period_end ? new Date(`${subscription.current_period_end}T00:00:00`) : null;
-    const base = currentEnd && currentEnd > today ? currentEnd : today;
-    const nextEnd = new Date(base); nextEnd.setMonth(nextEnd.getMonth() + Number(plan?.period_months ?? 1));
+    const targetPlanId = payment.plan_id ?? subscription.plan_id;
+    const plan = await plans.findOne({ id: targetPlanId }, { projection: { period_months: 1 }, session });
+    const today = todayIso();
+    const periodStart = await nextPaymentPeriodStart(String(payment.workshop_id), subscription.current_period_end ?? null, session);
+    const periodEnd = addMonths(periodStart, Number(plan?.period_months ?? 1));
+    const currentStillActive = typeof subscription.current_period_end === "string" && subscription.current_period_end > today;
+    const shouldUpdateCurrentSubscription = !currentStillActive || subscription.plan_id === targetPlanId || periodStart <= today;
     const reviewedAt = nowIso();
     const updated = await payments.updateOne(
       { id: params.paymentId, status: { $ne: "validated" } },
-      { $set: { status: "validated", reviewed_at: reviewedAt, reviewed_by: params.reviewerUserId, review_note: params.note ?? null } }, { session },
+      {
+        $set: {
+          status: "validated",
+          reviewed_at: reviewedAt,
+          reviewed_by: params.reviewerUserId,
+          review_note: params.note ?? null,
+          access_period_start: periodStart,
+          access_period_end: periodEnd,
+        },
+      }, { session },
     );
     if (updated.modifiedCount !== 1) return { alreadyValidated: true };
-    await subscriptions.updateOne({ id: subscription.id }, { $set: { status: "active", current_period_end: nextEnd.toISOString().slice(0, 10), grace_ends_at: null, updated_at: reviewedAt }, $inc: { row_version: 1 } }, { session });
-    await recordAudit({ workshopId: String(payment.workshop_id), actorUserId: params.reviewerUserId, action: "platform_payment.validate", entityKind: "platform_payment", entityId: String(payment.id), reason: params.note ?? null, before: { subscriptionEnd: subscription.current_period_end }, after: { subscriptionEnd: nextEnd.toISOString().slice(0, 10) } }, session);
-    return { alreadyValidated: false };
+    if (shouldUpdateCurrentSubscription) {
+      await subscriptions.updateOne({ id: subscription.id }, { $set: { plan_id: targetPlanId, status: "active", current_period_end: periodEnd, grace_ends_at: null, updated_at: reviewedAt }, $inc: { row_version: 1 } }, { session });
+    }
+    await recordAudit({ workshopId: String(payment.workshop_id), actorUserId: params.reviewerUserId, action: "platform_payment.validate", entityKind: "platform_payment", entityId: String(payment.id), reason: params.note ?? null, before: { planId: subscription.plan_id, subscriptionEnd: subscription.current_period_end }, after: { planId: shouldUpdateCurrentSubscription ? targetPlanId : subscription.plan_id, subscriptionEnd: shouldUpdateCurrentSubscription ? periodEnd : subscription.current_period_end, scheduledPlanId: targetPlanId, accessPeriodStart: periodStart, accessPeriodEnd: periodEnd } }, session);
+    return { alreadyValidated: false, scheduledForLater: !shouldUpdateCurrentSubscription };
   });
 }
 
@@ -113,4 +167,39 @@ export async function createTicket(params: { workshopId?: string | null; request
   const id = newId(); const timestamp = nowIso(); const tickets = await collection("tickets");
   await tickets.insertOne({ id, workshop_id: params.workshopId ?? null, requester_user_id: params.requesterUserId ?? null, requester_name: params.requesterName, requester_contact: params.requesterContact, category: params.category, subject: params.subject, body: params.body, status: "open", assignee_user_id: null, created_at: timestamp, updated_at: timestamp });
   return id;
+}
+
+async function nextPaymentPeriodStart(
+  workshopId: string,
+  currentPeriodEnd: string | null,
+  session?: ClientSession,
+): Promise<string> {
+  const payments = await collection("platform_payments");
+  const latest = await payments.findOne(
+    {
+      workshop_id: workshopId,
+      status: "validated",
+      access_period_end: { $type: "string" },
+    },
+    {
+      projection: { access_period_end: 1 },
+      sort: { access_period_end: -1 },
+      session,
+    },
+  );
+  return maxIsoDate(todayIso(), currentPeriodEnd, latest?.access_period_end ? String(latest.access_period_end) : null);
+}
+
+function addMonths(startIso: string, months: number): string {
+  const date = new Date(`${startIso}T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
+function maxIsoDate(...values: Array<string | null | undefined>): string {
+  return values.filter((value): value is string => Boolean(value)).sort().at(-1) ?? todayIso();
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }

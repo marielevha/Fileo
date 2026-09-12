@@ -4,6 +4,7 @@ import type { ClientSession } from "mongodb";
 import { recordAudit } from "@/lib/audit";
 import { collection, fromBool, newId, nowIso, toBool, withTransaction } from "@/lib/db";
 import { parseLimits } from "@/lib/repos/contents";
+import { getCurrentSubscription } from "@/lib/repos/subscriptions";
 import type { WorkshopRole } from "@/lib/permissions";
 
 export type TeamStatus = "active" | "disabled" | "invited";
@@ -404,14 +405,10 @@ export async function getTeamPlanUsage(
   session?: ClientSession,
 ): Promise<TeamPlanUsage> {
   const memberships = await collection("memberships");
-  const subscriptions = await collection("subscriptions");
   const plans = await collection("plans");
   const [activeMembers, subscription] = await Promise.all([
     memberships.countDocuments({ workshop_id: workshopId, status: "active" }, { session }),
-    subscriptions.findOne(
-      { workshop_id: workshopId, status: { $in: ["trial", "active", "renewal_due"] } },
-      { sort: { current_period_end: -1, created_at: -1 }, session },
-    ),
+    getCurrentSubscription(workshopId, session),
   ]);
   const plan = subscription
     ? await plans.findOne(

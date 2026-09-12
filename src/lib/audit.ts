@@ -41,6 +41,7 @@ export type AuditAction =
   | "plan.create"
   | "plan.archive"
   | "subscription.update"
+  | "platform_payment.declare"
   | "platform_payment.validate"
   | "platform_payment.reject"
   | "content.publish"

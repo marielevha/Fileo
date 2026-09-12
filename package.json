@@ -15,6 +15,7 @@
     "check:planning": "node scripts/check-planning.mjs",
     "check:payments": "node scripts/check-payments.mjs",
     "check:team": "node scripts/check-team.mjs",
+    "check:subscriptions": "node scripts/check-subscriptions.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node scripts/seed.mjs",
     "db:migrate:sqlite": "node scripts/migrate-sqlite-to-mongodb.mjs"
