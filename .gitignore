@@ -16,3 +16,4 @@ atlas-credentials.env
 next-env.d.ts
 .DS_Store
 .vercel
+config-momo.env
