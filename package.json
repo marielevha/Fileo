@@ -11,6 +11,7 @@
     "check:money": "node scripts/check-money.mjs",
     "check:smoke": "node scripts/smoke.mjs",
     "check:clients": "node scripts/check-clients.mjs",
+    "check:order-create": "node scripts/check-order-create.mjs",
     "check:orders": "node scripts/check-orders.mjs",
     "check:planning": "node scripts/check-planning.mjs",
     "check:payments": "node scripts/check-payments.mjs",

@@ -75,12 +75,16 @@ export default async function OrderDetailPage({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium">{item.description}</p>
+                      <p className="text-primary mt-1 text-xs font-semibold uppercase tracking-wide">
+                        {item.work_type === "retouche" ? "Retouche" : "Creation"}
+                      </p>
                       <p className="text-base-content/55 mt-0.5 text-sm">
                         {item.category} · quantité {item.quantity}
                         {item.due_date
                           ? ` · échéance ${new Date(`${item.due_date}T00:00:00`).toLocaleDateString("fr-FR")}`
                           : ""}
                       </p>
+                      <ItemMeasurements item={item} />
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -235,6 +239,68 @@ export default async function OrderDetailPage({
         </aside>
       </div>
     </>
+  );
+}
+
+type MeasurementSnapshot = {
+  wearer_name?: string | null;
+  wearer_relation?: string | null;
+  values?: Record<string, unknown>;
+  notes?: string | null;
+};
+
+function parseMeasurements(value: string | null): MeasurementSnapshot | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as MeasurementSnapshot;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function ItemMeasurements({
+  item,
+}: {
+  item: {
+    wearer_name?: string | null;
+    wearer_relation?: string | null;
+    measurement_snapshot: string | null;
+  };
+}) {
+  const snapshot = parseMeasurements(item.measurement_snapshot);
+  const wearerName = item.wearer_name ?? snapshot?.wearer_name ?? null;
+  const wearerRelation = item.wearer_relation ?? snapshot?.wearer_relation ?? null;
+  const values = snapshot?.values && typeof snapshot.values === "object"
+    ? Object.entries(snapshot.values)
+    : [];
+
+  if (!wearerName && !wearerRelation && values.length === 0 && !snapshot?.notes) return null;
+
+  return (
+    <div className="mt-3 rounded-xl border border-base-300 bg-base-200/35 p-3 text-sm">
+      {wearerName || wearerRelation ? (
+        <p className="font-medium">
+          Pour : {wearerName ?? "Non precise"}
+          {wearerRelation ? <span className="text-base-content/55"> Â· {wearerRelation}</span> : null}
+        </p>
+      ) : null}
+
+      {values.length > 0 ? (
+        <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+          {values.map(([label, measurementValue]) => (
+            <div key={label} className="flex justify-between gap-3">
+              <dt className="text-base-content/55">{label}</dt>
+              <dd className="font-medium">{String(measurementValue)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      {snapshot?.notes ? (
+        <p className="text-base-content/65 mt-2 whitespace-pre-line">{snapshot.notes}</p>
+      ) : null}
+    </div>
   );
 }
 

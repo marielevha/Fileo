@@ -60,6 +60,63 @@ Resultat : TypeScript, ESLint et le scenario abonnement sont verts.
 
 ---
 
+## Mise a jour Codex - 12 septembre 2026 - commandes
+
+Branche active : `feature/enregistrement-commandes`.
+
+Travail realise :
+
+- Ajout de la chaine complete de creation de commande depuis
+  `/atelier/commandes/nouvelle` : choix du client, dates, articles dynamiques,
+  instructions, reduction et acompte initial si l'utilisateur a le droit
+  financier.
+- La creation est transactionnelle : document `orders`, lignes `order_items`,
+  eventuel mouvement `financial_movements`, audit `order.create` et audit
+  `payment.record`.
+- Decision produit sur les articles : en V1, les mesures sont saisies
+  directement sur chaque article de commande, avec `work_type` (`creation` ou
+  `retouche`), `wearer_name` optionnel et `measurement_snapshot`. Le
+  client reste le dossier commercial/payeur, pas forcement la personne mesuree.
+  `wearer_relation` et `quantity` restent techniques mais ne sont pas exposes
+  dans le formulaire pour l'instant.
+- La fiche commande affiche les mensurations rattachees a chaque article.
+- Evolution possible plus tard : ajouter des profils "personnes a habiller"
+  rattaches au client pour reutiliser les mesures, suivre leur historique et
+  eviter les ressaisies. Cette evolution ne doit pas supprimer le snapshot sur
+  l'article : une commande doit toujours conserver les mesures effectivement
+  utilisees au moment de la fabrication.
+- Ajout du script `npm.cmd run check:order-create` pour verifier le formulaire
+  HTTP, la persistance, l'acompte, l'audit, les mensurations article et la fiche
+  detail.
+- UX de creation commande : les articles ne sont plus empiles sous forme de
+  formulaires repetes. Un seul bloc prepare l'article, puis l'ajoute dans un
+  tableau recapitulatif modifiable avant la creation finale.
+- Les champs `instructions atelier`, `reduction` et `motif reduction` sont
+  masques dans le formulaire de creation commande pour la V1. Le formulaire
+  garde seulement le montant global, l'acompte et le reste a payer calcule en
+  direct. Le montant global est calcule depuis les prix articles ; si aucun prix
+  article n'est saisi, le montant global saisi en fin de formulaire est applique
+  a la commande.
+- UX client dans la creation commande : le formulaire garde un select de client
+  simple, avec une action `+` a droite qui ouvre une modale de creation client.
+  La modale prepare une fiche minimale qui sera creee inline a la soumission de
+  la commande, sans quitter le flux.
+- Apres creation d'une commande, le formulaire affiche une modale de succes avec
+  un lien vers la fiche detail. La redirection automatique immediate a ete
+  remplacee par cette confirmation utilisateur.
+
+Validations executees :
+
+```powershell
+.\.tools\node\npm.cmd exec tsc -- --noEmit --pretty false
+.\.tools\node\npm.cmd run lint
+.\.tools\node\npm.cmd run check:order-create
+```
+
+Resultat : TypeScript, ESLint et le scenario creation de commande sont verts.
+
+---
+
 ## Mise a jour Codex - 11 septembre 2026
 
 Travail realise dans cette session :

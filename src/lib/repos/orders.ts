@@ -1,6 +1,8 @@
 import "server-only";
 
-import { collection } from "@/lib/db";
+import type { ClientSession } from "mongodb";
+import { recordAudit } from "@/lib/audit";
+import { collection, newId, nowIso, withTransaction } from "@/lib/db";
 import {
   computeOrderBalance,
   money,
@@ -42,6 +44,9 @@ export type OrderItemRow = {
   order_id: string;
   category: string;
   description: string;
+  work_type?: string | null;
+  wearer_name: string | null;
+  wearer_relation: string | null;
   quantity: number;
   unit_price_amount: number;
   currency: string;
@@ -83,6 +88,55 @@ export type OrderPage = {
   pageSize: number;
   pageCount: number;
 };
+
+export type InitialPaymentMethod = "cash" | "mobile_money" | "transfer" | "other";
+export type OrderItemWorkType = "creation" | "retouche";
+
+export type CreateOrderItemInput = {
+  category: string;
+  description: string;
+  workType: OrderItemWorkType;
+  wearerName?: string | null;
+  wearerRelation?: string | null;
+  quantity: number;
+  unitPrice: Money;
+  dueDate?: string | null;
+  assigneeUserId?: string | null;
+  measurementValues?: Record<string, string>;
+  measurementNotes?: string | null;
+};
+
+export type CreateOrderInput = {
+  workshopId: string;
+  actorUserId: string;
+  clientId: string;
+  currency: CurrencyCode;
+  discount: Money;
+  discountReason?: string | null;
+  instructions?: string | null;
+  promisedDate?: string | null;
+  fittingDate?: string | null;
+  items: CreateOrderItemInput[];
+  initialPayment?: {
+    amount: Money;
+    method: InitialPaymentMethod;
+    reference?: string | null;
+    effectiveDate: string;
+    idempotencyKey: string;
+  } | null;
+};
+
+export type CreateOrderResult = {
+  orderId: string;
+  reference: string;
+};
+
+export class OrderWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderWriteError";
+  }
+}
 
 export function deriveOrderState(order: OrderRow, items: OrderItemRow[]): OrderState {
   if (order.cancelled_at) return "annulee";
@@ -208,4 +262,185 @@ export async function nextOrderReference(workshopId: string): Promise<string> {
   const orders = await collection("orders");
   const total = await orders.countDocuments({ workshop_id: workshopId });
   return `CMD-${String(total + 1).padStart(4, "0")}`;
+}
+
+export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
+  if (input.items.length === 0) {
+    throw new OrderWriteError("Ajoutez au moins un article a la commande.");
+  }
+  if (input.discount.currency !== input.currency) {
+    throw new OrderWriteError("La reduction doit utiliser la devise de la commande.");
+  }
+  if (input.discount.amount < 0) {
+    throw new OrderWriteError("La reduction ne peut pas etre negative.");
+  }
+  if (input.initialPayment) {
+    if (input.initialPayment.amount.currency !== input.currency) {
+      throw new OrderWriteError("L'acompte doit utiliser la devise de la commande.");
+    }
+    if (input.initialPayment.amount.amount <= 0) {
+      throw new OrderWriteError("L'acompte doit etre strictement positif.");
+    }
+  }
+
+  return withTransaction(async (session) => {
+    const clients = await collection("clients");
+    const orders = await collection("orders");
+    const orderItems = await collection("order_items");
+    const movements = await collection("financial_movements");
+
+    const client = await clients.findOne(
+      { id: input.clientId, workshop_id: input.workshopId, deleted_at: null },
+      { projection: { id: 1, display_name: 1 }, session },
+    );
+    if (!client) {
+      throw new OrderWriteError("Ce client n'existe plus ou n'est pas accessible.");
+    }
+
+    const reference = await nextOrderReferenceInSession(input.workshopId, session);
+    const orderId = newId();
+    const timestamp = nowIso();
+
+    await orders.insertOne({
+      id: orderId,
+      workshop_id: input.workshopId,
+      client_id: input.clientId,
+      reference,
+      currency: input.currency,
+      discount_amount: input.discount.amount,
+      discount_reason: input.discountReason ?? null,
+      instructions: input.instructions ?? null,
+      promised_date: input.promisedDate ?? null,
+      fitting_date: input.fittingDate ?? null,
+      cancelled_at: null,
+      created_by: input.actorUserId,
+      created_at: timestamp,
+      updated_at: timestamp,
+      row_version: 1,
+    }, { session });
+
+    const rows = input.items.map((item, index) => {
+      return {
+        id: newId(),
+        workshop_id: input.workshopId,
+        order_id: orderId,
+        category: item.category.trim(),
+        description: item.description.trim(),
+        work_type: item.workType,
+        wearer_name: item.wearerName?.trim() || null,
+        wearer_relation: item.wearerRelation?.trim() || null,
+        quantity: item.quantity,
+        unit_price_amount: item.unitPrice.amount,
+        currency: input.currency,
+        status: "a_realiser",
+        due_date: item.dueDate ?? input.promisedDate ?? null,
+        delivered_quantity: 0,
+        delivered_at: null,
+        assignee_user_id: item.assigneeUserId ?? null,
+        measurement_snapshot: serialiseItemMeasurements({
+          wearerName: item.wearerName,
+          wearerRelation: item.wearerRelation,
+          values: item.measurementValues,
+          notes: item.measurementNotes,
+          capturedAt: timestamp.slice(0, 10),
+        }),
+        cancelled_at: null,
+        sort_order: index + 1,
+        created_at: timestamp,
+        updated_at: timestamp,
+        row_version: 1,
+      };
+    });
+    await orderItems.insertMany(rows, { session });
+
+    await recordAudit({
+      workshopId: input.workshopId,
+      actorUserId: input.actorUserId,
+      action: "order.create",
+      entityKind: "order",
+      entityId: orderId,
+      after: {
+        reference,
+        clientId: input.clientId,
+        itemCount: input.items.length,
+        discountAmount: input.discount.amount,
+      },
+    }, session);
+
+    if (input.initialPayment) {
+      const existing = await movements.findOne(
+        { workshop_id: input.workshopId, idempotency_key: input.initialPayment.idempotencyKey },
+        { session },
+      );
+      if (existing) {
+        throw new OrderWriteError("Cette tentative d'encaissement a deja ete utilisee. Rechargez la page.");
+      }
+
+      const movementId = newId();
+      await movements.insertOne({
+        id: movementId,
+        workshop_id: input.workshopId,
+        order_id: orderId,
+        kind: "payment",
+        amount: input.initialPayment.amount.amount,
+        currency: input.currency,
+        method: input.initialPayment.method,
+        reference: input.initialPayment.reference ?? null,
+        effective_date: input.initialPayment.effectiveDate,
+        status: "confirmed",
+        reverses_id: null,
+        void_reason: null,
+        idempotency_key: input.initialPayment.idempotencyKey,
+        created_by: input.actorUserId,
+        created_at: timestamp,
+        row_version: 1,
+      }, { session });
+      await recordAudit({
+        workshopId: input.workshopId,
+        actorUserId: input.actorUserId,
+        action: "payment.record",
+        entityKind: "financial_movement",
+        entityId: movementId,
+        after: {
+          orderId,
+          amount: input.initialPayment.amount.amount,
+          currency: input.currency,
+          method: input.initialPayment.method,
+        },
+      }, session);
+    }
+
+    return { orderId, reference };
+  });
+}
+
+async function nextOrderReferenceInSession(workshopId: string, session: ClientSession): Promise<string> {
+  const orders = await collection("orders");
+  const total = await orders.countDocuments({ workshop_id: workshopId }, { session });
+  return `CMD-${String(total + 1).padStart(4, "0")}`;
+}
+
+function serialiseItemMeasurements(snapshot: {
+  wearerName?: string | null;
+  wearerRelation?: string | null;
+  values?: Record<string, string>;
+  notes?: string | null;
+  capturedAt: string;
+}): string | null {
+  const values = Object.fromEntries(
+    Object.entries(snapshot.values ?? {}).filter(([key, value]) => key.trim() && value.trim()),
+  );
+  const wearerName = snapshot.wearerName?.trim() || null;
+  const wearerRelation = snapshot.wearerRelation?.trim() || null;
+  const notes = snapshot.notes?.trim() || null;
+  if (!wearerName && !wearerRelation && Object.keys(values).length === 0 && !notes) return null;
+
+  return JSON.stringify({
+    source: "order_item",
+    wearer_name: wearerName,
+    wearer_relation: wearerRelation,
+    values,
+    notes,
+    captured_at: snapshot.capturedAt,
+  });
 }
