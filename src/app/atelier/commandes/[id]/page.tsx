@@ -5,6 +5,7 @@ import PageHeader from "@/components/app/PageHeader";
 import Icon from "@/components/ui/Icon";
 import { requireWorkshop } from "@/lib/auth/guards";
 import { formatMoney, money, multiply, type CurrencyCode } from "@/lib/money";
+import { listOrderAttachmentsWithUrls } from "@/lib/repos/attachments";
 import { getOrder, ITEM_STATUS_LABELS, ORDER_STATE_LABELS, type ItemStatus } from "@/lib/repos/orders";
 import { listMovements, METHOD_LABELS, type MovementMethod } from "@/lib/repos/payments";
 import { localePath } from "@/lib/i18n/config";
@@ -32,7 +33,10 @@ export default async function OrderDetailPage({
 
   const { order, items, state, balance, isLate } = summary;
   const currency = order.currency as CurrencyCode;
-  const movements = workshop.canViewMoney ? await listMovements(workshop.id, order.id) : [];
+  const [movements, attachments] = await Promise.all([
+    workshop.canViewMoney ? listMovements(workshop.id, order.id) : Promise.resolve([]),
+    listOrderAttachmentsWithUrls(workshop.id, order.id),
+  ]);
 
   return (
     <>
@@ -116,6 +120,45 @@ export default async function OrderDetailPage({
               </p>
             </section>
           ) : null}
+
+          <section className="bg-base-100 border-base-300 rounded-2xl border">
+            <h2 className="border-base-300 font-display border-b px-6 py-4 font-bold">
+              Pieces jointes ({attachments.length})
+            </h2>
+
+            {attachments.length === 0 ? (
+              <p className="text-base-content/55 px-6 py-10 text-center text-sm">
+                Aucune photo ou note jointe a cette commande.
+              </p>
+            ) : (
+              <ul className="divide-base-300 divide-y">
+                {attachments.map((attachment) => (
+                  <li key={attachment.id} className="flex items-center gap-4 px-6 py-3.5">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {attachment.original_filename}
+                      </span>
+                      <span className="text-base-content/55 block text-xs">
+                        {formatFileSize(attachment.size_bytes)} · {attachment.mime_type}
+                      </span>
+                    </span>
+                    {attachment.signed_url ? (
+                      <Link
+                        href={attachment.signed_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-ghost btn-sm"
+                      >
+                        Ouvrir
+                      </Link>
+                    ) : (
+                      <span className="badge badge-warning badge-sm">Lien indisponible</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           {workshop.canViewMoney ? (
             <section className="bg-base-100 border-base-300 rounded-2xl border">
@@ -311,4 +354,10 @@ function Row({ label, value }: { label: string; value: string }) {
       <dd className="font-medium">{value}</dd>
     </div>
   );
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} o`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} Ko`;
+  return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
 }

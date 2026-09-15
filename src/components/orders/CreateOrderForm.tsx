@@ -504,6 +504,30 @@ export default function CreateOrderForm({
         </div>
       </section>
 
+      <section className="rounded-2xl border border-base-300 bg-base-100 p-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-end">
+          <div>
+            <h2 className="font-display font-bold">Photos et notes</h2>
+            <p className="mt-1 text-sm text-base-content/55">
+              Ajoutez les photos de mesures, croquis, modele ou note manuscrite liees a cette commande.
+            </p>
+            <p className="mt-2 text-xs text-base-content/45">
+              Images ou PDF, 8 fichiers maximum, 8 Mo par fichier.
+            </p>
+          </div>
+          <label className="form-control">
+            <span className="label-text mb-2 font-medium">Pieces jointes</span>
+            <input
+              type="file"
+              name="orderFiles"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+              multiple
+              className="file-input file-input-bordered w-full"
+            />
+          </label>
+        </div>
+      </section>
+
       {canViewMoney ? (
         <section className="rounded-2xl border border-base-300 bg-base-100">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-base-300 px-5 py-4">
@@ -609,7 +633,7 @@ export default function CreateOrderForm({
         <Link href={cancelHref} className="btn btn-ghost">
           Annuler
         </Link>
-        <button type="submit" className="btn btn-primary gap-2" disabled={pending || clients.length === 0 || rows.length === 0}>
+        <button type="submit" className="btn btn-primary gap-2" disabled={pending || (!inlineClient && clients.length === 0) || rows.length === 0}>
           {pending ? (
             <span className="loading loading-spinner loading-sm" />
           ) : (
@@ -629,6 +653,9 @@ export default function CreateOrderForm({
             <p className="mt-2 text-sm text-base-content/60">
               La commande {state.reference ?? ""} a ete enregistree avec succes.
             </p>
+            {state.warning ? (
+              <p className="alert alert-warning mt-4 py-3 text-left text-sm">{state.warning}</p>
+            ) : null}
             <div className="mt-6 flex justify-center">
               <Link href={`${cancelHref}/${state.orderId}`} className="btn btn-primary">
                 Voir la commande

@@ -7,6 +7,7 @@ import { localePath } from "@/lib/i18n/config";
 import { getLocale } from "@/lib/i18n/request";
 import { isCurrencyCode, money, parseAmount } from "@/lib/money";
 import { isCountryCode, parsePhone } from "@/lib/phone";
+import { AttachmentUploadError, uploadOrderAttachments } from "@/lib/repos/attachments";
 import { createClient } from "@/lib/repos/clients";
 import {
   createOrder,
@@ -22,6 +23,7 @@ export type OrderFormState = {
   success?: boolean;
   orderId?: string;
   reference?: string;
+  warning?: string;
 };
 
 const METHODS: InitialPaymentMethod[] = ["cash", "mobile_money", "transfer", "other"];
@@ -279,10 +281,32 @@ export async function createOrderAction(
     throw error;
   }
 
+  let warning: string | undefined;
+  const orderFiles = formData.getAll("orderFiles").filter((value): value is File => value instanceof File && value.size > 0);
+  if (orderFiles.length > 0) {
+    try {
+      await uploadOrderAttachments({
+        workshopId: session.workshop.id,
+        orderId: result.orderId,
+        clientId,
+        actorUserId: session.user.id,
+        files: orderFiles,
+        kind: "measurement_photo",
+      });
+    } catch (error) {
+      if (error instanceof AttachmentUploadError) {
+        warning = `Commande creee, mais les fichiers n'ont pas ete ajoutes : ${error.message}`;
+      } else {
+        throw error;
+      }
+    }
+  }
+
   revalidatePath(localePath(locale, "/atelier/commandes"));
   return {
     success: true,
     orderId: result.orderId,
     reference: result.reference,
+    warning,
   };
 }

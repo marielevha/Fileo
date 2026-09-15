@@ -20,11 +20,14 @@
     "check:momo:sandbox": "node scripts/check-momo-sandbox.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node scripts/seed.mjs",
-    "db:migrate:sqlite": "node scripts/migrate-sqlite-to-mongodb.mjs"
+    "db:migrate:sqlite": "node scripts/migrate-sqlite-to-mongodb.mjs",
+    "db:migrate:mongo-to-postgres": "node scripts/migrate-mongodb-to-postgres.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "mongodb": "^7.6.0",
     "next": "^15.1.6",
+    "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1"

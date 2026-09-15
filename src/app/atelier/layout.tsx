@@ -11,8 +11,10 @@ import { getMessages } from "@/lib/i18n/messages";
 import { localePath } from "@/lib/i18n/config";
 
 export default async function AtelierLayout({ children }: { children: React.ReactNode }) {
-  const { user, workshop, actor } = await requireWorkshop();
-  const locale = await getLocale();
+  const [{ user, workshop, actor }, locale] = await Promise.all([
+    requireWorkshop(),
+    getLocale(),
+  ]);
   const copy = getMessages(locale);
 
   // Money-related sections are hidden from actors without the right — the

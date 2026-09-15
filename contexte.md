@@ -10,6 +10,121 @@ encaissements de `feature/dashboard-atelier`.
 
 ---
 
+## Mise a jour Codex - 15 septembre 2026 - Supabase
+
+Branche active : `feature/supabase-migration`.
+
+Objectif de l'etape : redessiner proprement le schema SQL cible avant de
+commencer la migration MongoDB vers Supabase.
+
+Travail realise :
+
+- Ajout de `supabase/migrations/0001_initial_schema.sql`, premiere migration SQL
+  cible pour Supabase/PostgreSQL.
+- Ajout de `docs/supabase-schema.md`, note de conception qui explique les choix
+  de modele.
+- Le schema conserve `workshop_id` comme frontiere multi-tenant sur toutes les
+  tables metier.
+- Les identifiants restent en UUID pour faciliter la reprise des donnees
+  MongoDB.
+- Les montants restent des entiers avec devise separee.
+- Les dates metier deviennent des colonnes `date`; les evenements et audits
+  deviennent des `timestamptz`.
+- La table `app_users` prepare le lien vers Supabase Auth via `auth_user_id`,
+  tout en gardant une transition possible depuis les utilisateurs actuels.
+- Les commandes sont normalisees en `orders`, `order_items`,
+  `order_date_changes` et `financial_movements`.
+- Les mesures par article sont materialisees dans
+  `order_items.measurement_snapshot`, conformement a la decision produit V1.
+- Les abonnements sont separes en `subscriptions`, `platform_payments` et
+  `subscription_periods`. `subscription_periods` porte la file des periodes
+  d'acces, ce qui evite qu'une offre Pro validee remplace une offre Essential
+  encore active.
+- Les fichiers a stocker dans Supabase Storage sont representes par
+  `attachments`, avec rattachement possible aux clients, commandes, articles,
+  encaissements ou paiements d'abonnement.
+- Le schema active des politiques RLS de lecture basees sur l'appartenance a un
+  atelier. Les ecritures restent volontairement cote serveur en V1.
+
+Points ouverts :
+
+- Choisir si la migration des comptes passe immediatement par Supabase Auth ou
+  si `password_hash` reste temporairement utilise.
+- Decider si les uploads Storage passent uniquement par le serveur ou par des
+  URLs signees.
+- Decider si les soldes de commande restent calcules par l'application ou s'ils
+  deviennent des vues SQL/materialized views.
+
+Etape suivante realisee : migration MongoDB vers Postgres preparee.
+
+- Ajout du script `scripts/migrate-mongodb-to-postgres.mjs`.
+- Ajout de la commande `npm.cmd run db:migrate:mongo-to-postgres`.
+- Le script lit MongoDB Atlas, transforme les collections actuelles et insere
+  les donnees dans les tables Supabase/Postgres dans l'ordre des dependances.
+- Options disponibles :
+  - `--dry-run` : lit Mongo et affiche les volumes sans ecrire dans Postgres.
+  - `--apply-schema` : applique `supabase/migrations/0001_initial_schema.sql`
+    avant l'import.
+  - `--replace` : vide explicitement les tables cible avant l'import.
+- Le script convertit de facon deterministe les identifiants non UUID vers des
+  UUID Postgres afin de conserver les references entre documents.
+- Les statuts Mongo historiques sont mappes vers les enums SQL :
+  `trial` -> `trialing`, `renewal_due`/`suspended` -> `past_due`,
+  `a_realiser` -> `todo`, `pret` -> `ready`, `en_cours` -> `in_progress`,
+  `essayage` -> `fitting`.
+- Les champs JSON (`limits_json`, `values_json`, `measurement_snapshot`,
+  `body_json`, `provider_payload`, audit) sont parses vers `jsonb`.
+- Les periodes d'abonnement sont reconstruites dans `subscription_periods`
+  depuis les paiements valides portant `access_period_start` /
+  `access_period_end`, ou depuis l'abonnement courant si aucune periode validee
+  n'existe encore.
+- Un dry-run a ete execute avec succes le 15 septembre 2026 :
+  12 utilisateurs, 3 ateliers, 3 offres, 10 memberships, 15 clients,
+  4 mesures, 3 abonnements, 11 commandes, 14 articles, 13 mouvements,
+  9 paiements plateforme, 9 periodes d'abonnement, 12 contenus, 2 tickets
+  et 112 entrees d'audit.
+- Une tentative d'import reel avec `--apply-schema` a ete lancee, mais elle a
+  echoue avant toute ecriture car l'hote renseigne dans `SUPABASE_DB_URL` ne se
+  resout pas en DNS (`ENOTFOUND`). Le script accepte aussi
+  `SUPABASE_POOLER_DB_URL` si l'URL pooler Supabase doit etre utilisee.
+- Apres ajout de l'URL pooler Supabase, l'import reel MongoDB -> Supabase /
+  Postgres a ete execute avec succes via :
+  `npm.cmd run db:migrate:mongo-to-postgres -- --apply-schema --replace`.
+- Correctifs apportes pendant l'import :
+  - application du schema sans transaction imbriquee `begin/commit`,
+  - reset controle du schema public Fileo quand `--apply-schema --replace` est
+    utilise,
+  - retrait de l'unicite SQL stricte sur `platform_payments.external_reference`
+    car l'historique contient deja deux paiements valides avec la meme
+    reference dans un atelier,
+  - nettoyage des references optionnelles vers utilisateurs : si une ancienne
+    valeur pointe vers un identifiant qui n'existe pas dans `app_users`, elle
+    est migree a `null`.
+- Verification Postgres apres import : les volumes importes correspondent au
+  dry-run. Les periodes d'abonnement montrent bien Fileo Essential actif avant
+  les periodes Fileo Pro planifiees pour Atelier Elegance.
+- Le bucket Storage prive retenu est `fileo` au lieu de `fileo-private`.
+- Debut du branchement Storage sur les fichiers de commande :
+  - ajout du client serveur Supabase `src/lib/supabase/admin.ts`,
+  - creation/verif automatique du bucket prive `fileo`,
+  - ajout de `src/lib/repos/attachments.ts` pour uploader les fichiers dans
+    Supabase Storage et conserver les metadonnees dans Mongo pendant la phase
+    de transition,
+  - ajout d'une section `Photos et notes` dans la creation de commande,
+  - affichage des pieces jointes sur la page detail commande avec URLs signees
+    temporaires,
+  - index Mongo `attachments.id` et `attachments.workshop_id/order_id`.
+- Test Storage reel effectue : upload d'un fichier de controle, creation d'une
+  URL signee, puis suppression du fichier sur le bucket `fileo`.
+- Optimisation UX/performance :
+  - ajout de loaders Next.js sur les zones racine, site public, atelier et
+    back-office,
+  - composant commun `PageLoader` avec spinner et lignes skeleton,
+  - parallelisation de la recuperation session/locale dans les layouts atelier
+    et admin pour reduire un peu l'attente serveur.
+
+---
+
 ## Mise a jour Codex - 12 septembre 2026
 
 Branche active au moment du commit : `feature/abonnement-atelier`.

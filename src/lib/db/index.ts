@@ -82,6 +82,8 @@ async function initialise(): Promise<Db> {
     db.collection("contents").createIndex({ id: 1 }, { unique: true }),
     db.collection("contents").createIndex({ kind: 1, slug: 1, locale: 1 }, { unique: true }),
     db.collection("tickets").createIndex({ id: 1 }, { unique: true }),
+    db.collection("attachments").createIndex({ id: 1 }, { unique: true }),
+    db.collection("attachments").createIndex({ workshop_id: 1, order_id: 1, deleted_at: 1 }),
     db.collection("audit_log").createIndex({ id: 1 }, { unique: true }),
   ]);
 

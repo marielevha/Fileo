@@ -12,8 +12,10 @@ import { localePath } from "@/lib/i18n/config";
 
 /** Back-office shell (§12). Menu entries follow the caller's habilitations. */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, actor } = await requireAdmin();
-  const locale = await getLocale();
+  const [{ user, actor }, locale] = await Promise.all([
+    requireAdmin(),
+    getLocale(),
+  ]);
   const copy = getMessages(locale);
 
   const items = [
