@@ -125,6 +125,78 @@ Etape suivante realisee : migration MongoDB vers Postgres preparee.
 
 ---
 
+## Mise a jour Codex - 15 septembre 2026 - API mobile
+
+Branche active : `feature/mobile-api`, creee depuis `feature/supabase-migration`.
+
+Objectif : preparer une API HTTP claire pour l'application mobile, sans
+dupliquer la logique metier existante.
+
+Travail realise :
+
+- Ajout d'une API versionnee sous `/api/mobile/v1`.
+- Auth mobile par token Bearer reutilisant la collection `sessions` actuelle :
+  le web garde son cookie `fileo_session`, le mobile recoit un token dans
+  `POST /api/mobile/v1/auth/login`.
+- Ajout des routes :
+  - `GET /api/mobile/v1` : index/version des endpoints.
+  - `GET /api/mobile/v1/docs` : interface Swagger UI pour consulter et tester
+    les endpoints.
+  - `GET /api/mobile/v1/openapi.json` : specification OpenAPI 3.0.3.
+  - `POST /api/mobile/v1/auth/login` : connexion mobile.
+  - `POST /api/mobile/v1/auth/logout` : revocation de session.
+  - `GET /api/mobile/v1/me` : utilisateur + atelier courant.
+  - `GET /api/mobile/v1/bootstrap` : contexte + indicateurs dashboard.
+  - `GET/POST /api/mobile/v1/clients`.
+  - `GET/PATCH/DELETE /api/mobile/v1/clients/{id}`.
+  - `GET/POST /api/mobile/v1/clients/{id}/measurements`.
+  - `GET/POST /api/mobile/v1/orders`.
+  - `GET /api/mobile/v1/orders/{id}`.
+  - `GET/POST /api/mobile/v1/orders/{id}/attachments`.
+  - `GET /api/mobile/v1/planning`.
+  - `GET /api/mobile/v1/payments`.
+  - `POST /api/mobile/v1/payments/record`.
+- Ajout de `src/lib/mobile/api.ts` pour centraliser les reponses JSON, erreurs,
+  parsing JSON, token Bearer, permissions et validations simples.
+- Ajout de `src/lib/mobile/openapi.ts` pour documenter les endpoints mobiles,
+  schemas principaux, exemples de payload et authentification Bearer.
+- Extension de `src/lib/auth/session.ts` avec `createSessionToken`,
+  `getSessionByToken` et `destroySessionToken`.
+- Ajout du test HTTP `scripts/check-mobile-api.mjs` et de la commande
+  `npm.cmd run check:mobile-api`. Le test verifie aussi que Swagger UI et la
+  specification OpenAPI sont accessibles.
+- Ajout du CORS mobile dans `src/middleware.ts` pour `/api/mobile/v1/*` :
+  preflight `OPTIONS` en 204 et headers `Access-Control-Allow-*` sur les
+  reponses API. Cela permet de tester le login depuis un navigateur ou depuis
+  Expo Web sans erreur CORS.
+- Initialisation de l'application Expo dans `appmobile/` :
+  - projet `fileo-mobile` avec Expo Router et TypeScript,
+  - ecran login connecte au client `/api/mobile/v1`,
+  - onglets atelier : accueil, commandes, planning, clients, paiements,
+  - structure `src/api`, `src/components`, `src/features`, `src/theme`,
+    `src/types`,
+  - variable `EXPO_PUBLIC_FILEO_API_URL` documentee dans
+    `appmobile/.env.example`.
+- Le `tsconfig.json` racine exclut `appmobile`, car l'application Expo possede
+  son propre `tsconfig` et son propre `npm run typecheck`.
+
+Validations executees :
+
+```powershell
+.\.tools\node\npx.cmd tsc --noEmit --pretty false
+.\.tools\node\npm.cmd run lint
+$env:BASE_URL='http://localhost:3000'; .\.tools\node\npm.cmd run check:mobile-api
+cd appmobile; npm run typecheck
+```
+
+Resultat : TypeScript, ESLint et le scenario API mobile sont verts. Le test
+couvre login Bearer, me, bootstrap, creation/modification client, ajout mesure,
+creation commande, detail commande, encaissement, liste paiements, planning et
+logout, preflight CORS, Swagger/OpenAPI, avec nettoyage Mongo en fin de
+scenario. Le typecheck Expo est vert.
+
+---
+
 ## Mise a jour Codex - 12 septembre 2026
 
 Branche active au moment du commit : `feature/abonnement-atelier`.

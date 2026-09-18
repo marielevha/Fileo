@@ -9,7 +9,10 @@ const COOKIE_NAME = "fileo_session";
 const SESSION_DAYS = 30;
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
-export async function createSession(userId: string, options: { workshopId?: string | null; userAgent?: string | null } = {}): Promise<void> {
+export async function createSessionToken(
+  userId: string,
+  options: { workshopId?: string | null; userAgent?: string | null } = {},
+): Promise<{ token: string; expiresAt: string }> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   const sessions = await collection("sessions");
@@ -19,15 +22,24 @@ export async function createSession(userId: string, options: { workshopId?: stri
     user_agent: options.userAgent ?? null, created_at: timestamp, last_seen_at: timestamp,
     expires_at: expiresAt.toISOString(), revoked_at: null,
   });
+  return { token, expiresAt: expiresAt.toISOString() };
+}
+
+export async function createSession(userId: string, options: { workshopId?: string | null; userAgent?: string | null } = {}): Promise<void> {
+  const { token, expiresAt } = await createSessionToken(userId, options);
   const store = await cookies();
-  store.set(COOKIE_NAME, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", expires: expiresAt });
+  store.set(COOKIE_NAME, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", expires: new Date(expiresAt) });
+}
+
+export async function destroySessionToken(token: string): Promise<void> {
+  const sessions = await collection("sessions");
+  await sessions.updateOne({ token_hash: hashToken(token) }, { $set: { revoked_at: nowIso() } });
 }
 
 export async function destroySession(): Promise<void> {
   const store = await cookies(); const token = store.get(COOKIE_NAME)?.value;
   if (token) {
-    const sessions = await collection("sessions");
-    await sessions.updateOne({ token_hash: hashToken(token) }, { $set: { revoked_at: nowIso() } });
+    await destroySessionToken(token);
   }
   store.delete(COOKIE_NAME);
 }
@@ -45,8 +57,7 @@ export type SessionContext = {
   workshop: { id: string; name: string; currency: string; countryCode: string; timezone: string; status: string; role: WorkshopRole; canViewMoney: boolean } | null;
 };
 
-export async function getSession(): Promise<SessionContext | null> {
-  const store = await cookies(); const token = store.get(COOKIE_NAME)?.value;
+export async function getSessionByToken(token: string): Promise<SessionContext | null> {
   if (!token) return null;
   const sessions = await collection("sessions"); const users = await collection("users");
   const session = await sessions.findOne({ token_hash: hashToken(token), revoked_at: null, expires_at: { $gt: nowIso() } });
@@ -77,6 +88,11 @@ export async function getSession(): Promise<SessionContext | null> {
     actor: { userId: user.id, platformRoles, workshop: { id: String(workshop.id), role, canViewMoney, status: membership.status as "active" | "disabled" | "invited" } },
     workshop: { id: String(workshop.id), name: String(workshop.name), currency: String(workshop.currency), countryCode: String(workshop.country_code), timezone: String(workshop.timezone), status: String(workshop.status), role, canViewMoney },
   };
+}
+
+export async function getSession(): Promise<SessionContext | null> {
+  const store = await cookies(); const token = store.get(COOKIE_NAME)?.value;
+  return token ? getSessionByToken(token) : null;
 }
 
 export function parsePlatformRoles(raw: string): PlatformRole[] {

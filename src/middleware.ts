@@ -2,6 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n/config";
 
 const COOKIE = "fileo-locale";
+const MOBILE_API_PREFIX = "/api/mobile/v1";
+const MOBILE_API_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
+const MOBILE_API_HEADERS = "Authorization, Content-Type, Accept, Origin";
+
+function applyMobileCors(request: NextRequest, response: NextResponse) {
+  const origin = request.headers.get("origin") ?? "*";
+  response.headers.set("Access-Control-Allow-Origin", origin);
+  response.headers.set("Access-Control-Allow-Methods", MOBILE_API_METHODS);
+  response.headers.set("Access-Control-Allow-Headers", MOBILE_API_HEADERS);
+  response.headers.set("Access-Control-Max-Age", "86400");
+  response.headers.set("Vary", "Origin");
+  return response;
+}
+
+function handleMobileApiCors(request: NextRequest) {
+  if (!request.nextUrl.pathname.startsWith(MOBILE_API_PREFIX)) return null;
+  if (request.method === "OPTIONS") {
+    return applyMobileCors(request, new NextResponse(null, { status: 204 }));
+  }
+  return applyMobileCors(request, NextResponse.next());
+}
 
 function preferredLocale(request: NextRequest) {
   const saved = request.cookies.get(COOKIE)?.value;
@@ -13,6 +34,9 @@ function preferredLocale(request: NextRequest) {
 }
 
 export function middleware(request: NextRequest) {
+  const mobileApiCors = handleMobileApiCors(request);
+  if (mobileApiCors) return mobileApiCors;
+
   const segments = request.nextUrl.pathname.split("/").filter(Boolean);
   const locale = isLocale(segments[0]) ? segments[0] : undefined;
   const forwardedLocale = request.headers.get("x-fileo-locale") ?? undefined;
@@ -38,5 +62,8 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|icon.svg|favicon.ico|robots.txt|sitemap.xml).*)"],
+  matcher: [
+    "/api/mobile/v1/:path*",
+    "/((?!api|_next/static|_next/image|icon.svg|favicon.ico|robots.txt|sitemap.xml).*)",
+  ],
 };

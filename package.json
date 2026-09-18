@@ -18,6 +18,7 @@
     "check:team": "node scripts/check-team.mjs",
     "check:subscriptions": "node scripts/check-subscriptions.mjs",
     "check:momo:sandbox": "node scripts/check-momo-sandbox.mjs",
+    "check:mobile-api": "node scripts/check-mobile-api.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node scripts/seed.mjs",
     "db:migrate:sqlite": "node scripts/migrate-sqlite-to-mongodb.mjs",
