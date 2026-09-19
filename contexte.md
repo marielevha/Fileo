@@ -177,6 +177,13 @@ Travail realise :
     `src/types`,
   - variable `EXPO_PUBLIC_FILEO_API_URL` documentee dans
     `appmobile/.env.example`.
+- Parcours d'ouverture mobile :
+  - splash natif Expo et route `index` centres sur le mark Filéo seul,
+  - passage automatique du splash vers `/onboarding`,
+  - onboarding en 3 ecrans inspire de la reference fournie : retour, `Passer`,
+    illustration centrale, titre, texte, dots et bouton rond,
+  - illustrations onboarding refaites en SVG via `react-native-svg` pour un
+    rendu plus net sur iPhone.
 - Le `tsconfig.json` racine exclut `appmobile`, car l'application Expo possede
   son propre `tsconfig` et son propre `npm run typecheck`.
 
@@ -187,6 +194,7 @@ Validations executees :
 .\.tools\node\npm.cmd run lint
 $env:BASE_URL='http://localhost:3000'; .\.tools\node\npm.cmd run check:mobile-api
 cd appmobile; npm run typecheck
+cd appmobile; npx expo install --check
 ```
 
 Resultat : TypeScript, ESLint et le scenario API mobile sont verts. Le test

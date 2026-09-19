@@ -46,6 +46,7 @@ function RootLayoutNav() {
       <StatusBar style="light" />
       <Stack>
         <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="atelier" options={{ headerShown: false }} />
       </Stack>
