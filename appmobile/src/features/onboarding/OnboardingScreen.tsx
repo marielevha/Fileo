@@ -1,101 +1,52 @@
-import { SymbolView } from 'expo-symbols';
-import { router } from 'expo-router';
-import type { ComponentProps } from 'react';
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { Image, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Text } from '@/src/components/Text';
-import { OnboardingIllustration } from '@/src/features/onboarding/OnboardingIllustration';
-import { colors } from '@/src/theme/colors';
+import { AppText } from '../../components/AppText';
+import { palette, useAppTheme } from '../../theme';
 
-const slides = [
-  {
-    title: 'Commandes sans brouillon',
-    description: 'Creez une commande, ajoutez les articles et gardez les mesures au bon endroit.',
-    kind: 'orders',
-  },
-  {
-    title: 'Planning clair',
-    description: 'Suivez les essayages, les echeances et les retards sans perdre le fil.',
-    kind: 'planning',
-  },
-  {
-    title: 'Paiements maitrises',
-    description: 'Visualisez les acomptes, les soldes et les encaissements attendus par commande.',
-    kind: 'payments',
-  },
-] as const;
+type OnboardingScreenProps = {
+  onContinue: () => void;
+};
 
-type SymbolName = ComponentProps<typeof SymbolView>['name'];
-
-export function OnboardingScreen() {
-  const [index, setIndex] = useState(0);
-  const slide = slides[index];
-  const isFirst = index === 0;
-  const isLast = index === slides.length - 1;
-  const canGoBack = !isFirst;
-
-  const nextIcon = useMemo<SymbolName>(
-    () => ({
-      ios: isLast ? 'checkmark' : 'chevron.right',
-      android: isLast ? 'check' : 'chevron_right',
-      web: isLast ? 'check' : 'chevron_right',
-    }),
-    [isLast],
-  );
-
-  function goLogin() {
-    router.replace('/login');
-  }
-
-  function goNext() {
-    if (isLast) {
-      goLogin();
-      return;
-    }
-    setIndex((value) => value + 1);
-  }
+export function OnboardingScreen({ onContinue }: OnboardingScreenProps) {
+  const { height, width } = useWindowDimensions();
+  const theme = useAppTheme();
+  const artworkWidth = Math.min(width - 48, 430);
+  const artworkHeight = Math.min(height * 0.47, artworkWidth * 0.96);
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.card}>
-        <View style={styles.topBar}>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="light" />
+      <View style={styles.content}>
+        <View style={styles.artworkArea}>
+          <Image
+            accessibilityLabel="Une équipe de couture organise les activités de son atelier"
+            resizeMode="contain"
+            source={require('../../../assets/images/onboarding-workshop.png')}
+            style={{ height: artworkHeight, width: artworkWidth }}
+          />
+        </View>
+
+        <View style={styles.copyArea}>
+          <AppText color={palette.white} variant="title1">
+            Du talent dans les mains,{`\n`}
+            <AppText color={theme.colors.accent} variant="title1">
+              du temps sous contrôle.
+            </AppText>
+          </AppText>
+          <AppText color="rgba(255, 255, 255, 0.72)" style={styles.description}>
+            Centralisez vos clients, leurs mesures et chaque commande pour avancer sereinement.
+          </AppText>
+
           <Pressable
             accessibilityRole="button"
-            disabled={!canGoBack}
-            onPress={() => setIndex((value) => Math.max(0, value - 1))}
-            style={[styles.navButton, !canGoBack && styles.navButtonDisabled]}>
-            <SymbolView
-              name={{ ios: 'chevron.left', android: 'chevron_left', web: 'chevron_left' }}
-              size={24}
-              tintColor={colors.background}
-            />
-          </Pressable>
-
-          <Pressable accessibilityRole="button" onPress={goLogin} style={styles.skipButton}>
-            <Text style={styles.skipText}>Passer</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.illustrationWrap}>
-          <OnboardingIllustration kind={slide.kind} />
-        </View>
-
-        <View style={styles.copy}>
-          <Text style={styles.title}>{slide.title}</Text>
-          <Text style={styles.description}>{slide.description}</Text>
-        </View>
-
-        <View style={styles.footer}>
-          <View style={styles.dots}>
-            {slides.map((item, dotIndex) => (
-              <View key={item.title} style={[styles.dot, dotIndex === index && styles.dotActive]} />
-            ))}
-          </View>
-
-          <Pressable accessibilityRole="button" onPress={goNext} style={styles.nextButton}>
-            <SymbolView name={nextIcon} size={28} tintColor={colors.white} />
+            onPress={onContinue}
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          >
+            <AppText color={palette.violet950} variant="bodyMedium">
+              Organiser mon atelier
+            </AppText>
           </Pressable>
         </View>
       </View>
@@ -104,100 +55,42 @@ export function OnboardingScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
+  safeArea: {
+    backgroundColor: palette.violet950,
     flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
   },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: 32,
+  content: {
+    alignSelf: 'center',
     flex: 1,
-    overflow: 'hidden',
+    maxWidth: 560,
+    paddingBottom: 20,
     paddingHorizontal: 24,
-    paddingVertical: 18,
+    width: '100%',
   },
-  topBar: {
+  artworkArea: {
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 44,
-  },
-  navButton: {
-    alignItems: 'center',
-    borderRadius: 999,
-    height: 44,
+    flex: 1,
     justifyContent: 'center',
-    width: 44,
   },
-  navButtonDisabled: {
-    opacity: 0,
-  },
-  skipButton: {
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: 8,
-  },
-  skipText: {
-    color: colors.background,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  illustrationWrap: {
-    alignItems: 'center',
-    flex: 1.15,
-    justifyContent: 'center',
-    minHeight: 330,
-    paddingHorizontal: 2,
-  },
-  copy: {
-    alignItems: 'center',
-    gap: 10,
-    paddingBottom: 30,
-    paddingHorizontal: 8,
-  },
-  title: {
-    color: '#251f3d',
-    fontSize: 24,
-    fontWeight: '900',
-    lineHeight: 30,
-    textAlign: 'center',
+  copyArea: {
+    paddingTop: 12,
   },
   description: {
-    color: '#6d6683',
-    fontSize: 14,
-    lineHeight: 21,
-    maxWidth: 290,
-    textAlign: 'center',
+    marginTop: 14,
+    maxWidth: 430,
   },
-  footer: {
+  button: {
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 64,
-  },
-  dots: {
-    flexDirection: 'row',
-    gap: 7,
-    paddingLeft: 6,
-  },
-  dot: {
-    backgroundColor: '#eadff7',
-    borderRadius: 999,
-    height: 8,
-    width: 8,
-  },
-  dotActive: {
-    backgroundColor: colors.accent,
-    width: 18,
-  },
-  nextButton: {
-    alignItems: 'center',
-    backgroundColor: colors.accent,
-    borderRadius: 999,
-    height: 58,
+    backgroundColor: palette.white,
+    borderRadius: 16,
     justifyContent: 'center',
-    width: 58,
+    marginTop: 28,
+    minHeight: 56,
+    paddingHorizontal: 24,
+    width: '100%',
+  },
+  buttonPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.99 }],
   },
 });

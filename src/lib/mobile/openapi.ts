@@ -56,6 +56,85 @@ export function buildMobileOpenApi(origin?: string) {
           },
         },
       },
+      "/auth/refresh": {
+        post: {
+          tags: ["Auth"],
+          summary: "Renouveler une session mobile",
+          operationId: "refreshSession",
+          requestBody: bodyRef("RefreshRequest"),
+          responses: {
+            "200": { description: "Session renouvelee", content: json("LoginResponse") },
+            "400": error("Token manquant"),
+            "401": error("Session expiree"),
+          },
+        },
+      },
+      "/auth/register": {
+        post: {
+          tags: ["Auth"],
+          summary: "Creer un compte et son atelier",
+          operationId: "register",
+          requestBody: bodyRef("RegisterRequest"),
+          responses: {
+            "201": { description: "Compte cree, verification requise", content: json("RegisterResponse") },
+            "400": error("Donnees invalides"),
+            "409": error("Un compte existe deja"),
+            "429": error("Trop de demandes OTP"),
+          },
+        },
+      },
+      "/auth/otp/request": {
+        post: {
+          tags: ["Auth"],
+          summary: "Demander ou renvoyer un code OTP",
+          operationId: "requestOtp",
+          requestBody: bodyRef("OtpRequest"),
+          responses: {
+            "200": { description: "Demande acceptee", content: json("OtpChallengeResponse") },
+            "400": error("Donnees invalides"),
+            "429": error("Trop de demandes OTP"),
+          },
+        },
+      },
+      "/auth/otp/verify": {
+        post: {
+          tags: ["Auth"],
+          summary: "Verifier un code OTP",
+          operationId: "verifyOtp",
+          requestBody: bodyRef("OtpVerifyRequest"),
+          responses: {
+            "200": { description: "Code verifie", content: json("GenericSuccess") },
+            "400": error("Code invalide"),
+            "410": error("Code expire"),
+            "429": error("Trop de tentatives"),
+          },
+        },
+      },
+      "/auth/password/forgot": {
+        post: {
+          tags: ["Auth"],
+          summary: "Demander un code de recuperation",
+          operationId: "forgotPassword",
+          requestBody: bodyRef("ForgotPasswordRequest"),
+          responses: {
+            "200": { description: "Demande acceptee", content: json("OtpChallengeResponse") },
+            "400": error("Donnees invalides"),
+            "429": error("Trop de demandes"),
+          },
+        },
+      },
+      "/auth/password/reset": {
+        post: {
+          tags: ["Auth"],
+          summary: "Definir un nouveau mot de passe",
+          operationId: "resetPassword",
+          requestBody: bodyRef("ResetPasswordRequest"),
+          responses: {
+            "200": { description: "Mot de passe modifie", content: json("GenericSuccess") },
+            "400": error("Jeton ou mot de passe invalide"),
+          },
+        },
+      },
       "/auth/logout": {
         post: {
           tags: ["Auth"],
@@ -153,7 +232,7 @@ export function buildMobileOpenApi(origin?: string) {
         },
         delete: {
           tags: ["Clients"],
-          summary: "Archiver un client",
+          summary: "Supprimer logiquement un client",
           operationId: "deleteClient",
           security: bearer(),
           parameters: [pathId("id", "Identifiant client")],
@@ -163,7 +242,22 @@ export function buildMobileOpenApi(origin?: string) {
           },
         },
       },
-      "/clients/{id}/measurements": {
+      "/clients/{id}/archive": {
+        patch: {
+          tags: ["Clients"],
+          summary: "Archiver ou restaurer un client",
+          operationId: "setClientArchived",
+          security: bearer(),
+          parameters: [pathId("id", "Identifiant client")],
+          requestBody: bodyRef("ClientArchiveInput"),
+          responses: {
+            "200": { description: "Archivage mis a jour", content: json("GenericSuccess") },
+            "400": error("Etat d'archivage invalide"),
+            "404": error("Client introuvable"),
+          },
+        },
+      },
+        "/clients/{id}/measurements": {
         get: {
           tags: ["Measurements"],
           summary: "Lister les mensurations d'un client",
@@ -194,6 +288,8 @@ export function buildMobileOpenApi(origin?: string) {
           operationId: "listOrders",
           security: bearer(),
           parameters: [
+            query("q", "Recherche client, reference ou article"),
+            query("filter", "Filtre: all, late, nouvelle, en_cours, prete, partiellement_remise, remise, annulee"),
             query("page", "Page demandee", "integer"),
             query("pageSize", "Taille de page", "integer"),
           ],
@@ -227,8 +323,100 @@ export function buildMobileOpenApi(origin?: string) {
             "404": error("Commande introuvable"),
           },
         },
+        patch: {
+          tags: ["Orders"],
+          summary: "Modifier ou annuler une commande",
+          operationId: "updateOrder",
+          security: bearer(),
+          parameters: [pathId("id", "Identifiant commande")],
+          responses: {
+            "200": { description: "Commande mise a jour", content: json("GenericSuccess") },
+            "400": error("Donnees invalides"),
+            "404": error("Commande introuvable"),
+          },
+        },
+        "/clients/{id}/measurements/{measurementId}/attachments": {
+          get: {
+            tags: ["Attachments"],
+            summary: "Lister les pieces jointes d'une version de mensurations",
+            operationId: "listMeasurementAttachments",
+            security: bearer(),
+            parameters: [pathId("id", "Identifiant client"), pathId("measurementId", "Identifiant mensuration")],
+            responses: {
+              "200": { description: "Pieces jointes", content: json("AttachmentListResponse") },
+              "404": error("Mensuration introuvable"),
+            },
+          },
+          post: {
+            tags: ["Attachments"],
+            summary: "Uploader des photos ou documents de mensurations",
+            operationId: "uploadMeasurementAttachments",
+            security: bearer(),
+            parameters: [pathId("id", "Identifiant client"), pathId("measurementId", "Identifiant mensuration")],
+            requestBody: attachmentUploadBody(),
+            responses: {
+              "201": { description: "Pieces jointes ajoutees", content: json("AttachmentListResponse") },
+              "400": error("Fichier invalide"),
+              "404": error("Mensuration introuvable"),
+            },
+          },
+        },
+        "/clients/{id}/measurements/{measurementId}/attachments/{attachmentId}": {
+          delete: {
+            tags: ["Attachments"],
+            summary: "Supprimer une piece jointe de mensurations",
+            operationId: "deleteMeasurementAttachment",
+            security: bearer(),
+            parameters: [pathId("id", "Identifiant client"), pathId("measurementId", "Identifiant mensuration"), pathId("attachmentId", "Identifiant piece jointe")],
+            responses: {
+              "200": { description: "Piece jointe supprimee", content: json("DeleteResponse") },
+              "404": error("Piece jointe introuvable"),
+            },
+          },
+        },
       },
-      "/orders/{id}/attachments": {
+      "/orders/{id}/items/{itemId}": {
+        patch: {
+          tags: ["Orders"],
+          summary: "Modifier le statut ou l'echeance d'un article",
+          operationId: "updateOrderItem",
+          security: bearer(),
+          parameters: [pathId("id", "Identifiant commande"), pathId("itemId", "Identifiant article")],
+          responses: {
+            "200": { description: "Article mis a jour", content: json("GenericSuccess") },
+            "400": error("Changement invalide"),
+            "409": error("Conflit de modification"),
+          },
+        },
+      },
+      "/orders/{id}/close": {
+        post: {
+          tags: ["Orders"],
+          summary: "Remettre tous les articles et cloturer une commande soldee",
+          operationId: "closeOrder",
+          security: bearer(),
+          parameters: [pathId("id", "Identifiant commande")],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: {
+              type: "object",
+              required: ["articlesHandedOver", "paymentConfirmed"],
+              properties: {
+                articlesHandedOver: { type: "boolean", enum: [true] },
+                paymentConfirmed: { type: "boolean", enum: [true] },
+              },
+            } } },
+          },
+          responses: {
+            "200": { description: "Commande remise et soldee", content: json("GenericSuccess") },
+            "400": error("Confirmations manquantes"),
+            "403": error("Permission financiere manquante"),
+            "404": error("Commande introuvable"),
+            "409": error("Solde restant ou commande non cloturable"),
+          },
+        },
+      },
+        "/orders/{id}/attachments": {
         get: {
           tags: ["Attachments"],
           summary: "Lister les pieces jointes d'une commande",
@@ -279,11 +467,40 @@ export function buildMobileOpenApi(origin?: string) {
           security: bearer(),
           parameters: [
             query("q", "Recherche"),
-            query("status", "Statut: active, late, done, all"),
-            query("assignee", "Filtre collaborateur"),
+            query("status", "Statut: active, a_realiser, en_cours, a_essayer, pret, remis, annule, all"),
+            query("assignee", "Identifiant collaborateur, unassigned ou all"),
           ],
           responses: {
             "200": { description: "Planning", content: json("PlanningResponse") },
+          },
+        },
+      },
+      "/planning/{itemId}": {
+        patch: {
+          tags: ["Planning"],
+          summary: "Replanifier ou affecter une tache",
+          operationId: "updatePlanningItem",
+          security: bearer(),
+          parameters: [pathId("itemId", "Identifiant de l'article")],
+          requestBody: bodyRef("PlanningItemUpdateInput"),
+          responses: {
+            "200": { description: "Tache mise a jour", content: json("GenericSuccess") },
+            "400": error("Modification invalide"),
+            "404": error("Tache introuvable"),
+            "409": error("Conflit de modification"),
+          },
+        },
+        "/orders/{id}/attachments/{attachmentId}": {
+          delete: {
+            tags: ["Attachments"],
+            summary: "Supprimer une piece jointe de commande",
+            operationId: "deleteOrderAttachment",
+            security: bearer(),
+            parameters: [pathId("id", "Identifiant commande"), pathId("attachmentId", "Identifiant piece jointe")],
+            responses: {
+              "200": { description: "Piece jointe supprimee", content: json("DeleteResponse") },
+              "404": error("Piece jointe introuvable"),
+            },
           },
         },
       },
@@ -373,15 +590,94 @@ export function buildMobileOpenApi(origin?: string) {
             { $ref: "#/components/schemas/SessionPayload" },
             {
               type: "object",
-              required: ["token", "tokenType", "expiresAt"],
+              required: ["token", "refreshToken", "tokenType", "expiresAt"],
               properties: {
                 token: { type: "string" },
+                refreshToken: { type: "string" },
                 tokenType: { type: "string", example: "Bearer" },
                 expiresAt: { type: "string", format: "date-time" },
               },
             },
           ],
         }),
+        RefreshRequest: {
+          type: "object",
+          required: ["refreshToken"],
+          properties: {
+            refreshToken: { type: "string" },
+          },
+        },
+        RegisterRequest: {
+          type: "object",
+          required: ["fullName", "country", "phone", "password", "workshopName", "currency", "termsAccepted"],
+          properties: {
+            fullName: { type: "string", example: "Marie Lou" },
+            country: { type: "string", enum: ["CG", "CD"], example: "CG" },
+            phone: { type: "string", example: "+242061111111" },
+            password: { type: "string", format: "password", minLength: 8 },
+            workshopName: { type: "string", example: "Atelier Marie" },
+            city: { type: "string", nullable: true, example: "Brazzaville" },
+            currency: { type: "string", enum: ["XAF", "CDF", "USD"], example: "XAF" },
+            planCode: { type: "string", nullable: true },
+            termsAccepted: { type: "boolean", example: true },
+          },
+        },
+        RegisterResponse: successSchema({
+          type: "object",
+          required: ["userId", "workshopId", "phone", "requiresVerification", "resendAfter"],
+          properties: {
+            userId: { type: "string" },
+            workshopId: { type: "string" },
+            phone: { type: "string" },
+            requiresVerification: { type: "boolean", example: true },
+            resendAfter: { type: "string", format: "date-time" },
+          },
+        }),
+        OtpRequest: {
+          type: "object",
+          required: ["country", "phone", "purpose"],
+          properties: {
+            country: { type: "string", enum: ["CG", "CD"] },
+            phone: { type: "string" },
+            purpose: { type: "string", enum: ["signup", "password_reset"] },
+          },
+        },
+        ForgotPasswordRequest: {
+          type: "object",
+          required: ["country", "phone"],
+          properties: {
+            country: { type: "string", enum: ["CG", "CD"] },
+            phone: { type: "string" },
+          },
+        },
+        OtpVerifyRequest: {
+          type: "object",
+          required: ["country", "phone", "purpose", "code"],
+          properties: {
+            country: { type: "string", enum: ["CG", "CD"] },
+            phone: { type: "string" },
+            purpose: { type: "string", enum: ["signup", "password_reset"] },
+            code: { type: "string", pattern: "^[0-9]{6}$", example: "123456" },
+          },
+        },
+        OtpChallengeResponse: successSchema({
+          type: "object",
+          required: ["requested", "phone", "purpose", "resendAfter"],
+          properties: {
+            requested: { type: "boolean", example: true },
+            phone: { type: "string" },
+            purpose: { type: "string", enum: ["signup", "password_reset"] },
+            resendAfter: { type: "string", format: "date-time" },
+          },
+        }),
+        ResetPasswordRequest: {
+          type: "object",
+          required: ["accessToken", "password"],
+          properties: {
+            accessToken: { type: "string" },
+            password: { type: "string", format: "password", minLength: 8 },
+          },
+        },
         LogoutResponse: successSchema({
           type: "object",
           properties: { loggedOut: { type: "boolean", example: true } },
@@ -483,8 +779,7 @@ export function buildMobileOpenApi(origin?: string) {
             promisedDate: { type: "string", format: "date", nullable: true },
             fittingDate: { type: "string", format: "date", nullable: true },
             instructions: { type: "string", nullable: true },
-            discountAmount: { type: "integer", minimum: 0, example: 0 },
-            discountReason: { type: "string", nullable: true },
+            orderTotalAmount: { type: "integer", minimum: 0, example: 12000 },
             items: {
               type: "array",
               minItems: 1,
@@ -571,6 +866,25 @@ export function buildMobileOpenApi(origin?: string) {
             members: { type: "array", items: { type: "object", additionalProperties: true } },
           },
         }),
+        PlanningItemUpdateInput: {
+          type: "object",
+          required: ["status", "rowVersion"],
+          properties: {
+            status: {
+              type: "string",
+              enum: ["a_realiser", "en_cours", "a_essayer", "pret", "remis", "annule"],
+            },
+            dueDate: { type: "string", format: "date", nullable: true },
+            assigneeId: { type: "string", nullable: true },
+            reason: { type: "string", maxLength: 500 },
+            rowVersion: { type: "integer", minimum: 0 },
+          },
+        },
+        ClientArchiveInput: {
+          type: "object",
+          required: ["archived"],
+          properties: { archived: { type: "boolean" } },
+        },
         PaymentRecordInput: {
           type: "object",
           required: ["orderId", "amount", "method", "effectiveDate"],
@@ -612,6 +926,27 @@ function bodyRef(schemaName: string) {
   return {
     required: true,
     content: json(schemaName),
+  };
+}
+
+function attachmentUploadBody() {
+  return {
+    required: true,
+    content: {
+      "multipart/form-data": {
+        schema: {
+          type: "object",
+          required: ["files"],
+          properties: {
+            files: {
+              type: "array",
+              maxItems: 8,
+              items: { type: "string", format: "binary" },
+            },
+          },
+        },
+      },
+    },
   };
 }
 

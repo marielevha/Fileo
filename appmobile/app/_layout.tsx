@@ -1,55 +1,81 @@
-import { useFonts } from 'expo-font';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  useFonts as useInterFonts,
+} from '@expo-google-fonts/inter';
+import {
+  Outfit_600SemiBold,
+  Outfit_700Bold,
+  Outfit_800ExtraBold,
+  useFonts as useOutfitFonts,
+} from '@expo-google-fonts/outfit';
+import { useAssets } from 'expo-asset';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
+import { useEffect } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
+import { ThemeProvider, useAppTheme } from '../src/theme';
 
-export const unstable_settings = {
-  initialRouteName: 'index',
-};
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+void SystemUI.setBackgroundColorAsync('#1F1235');
+void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+  return <ThemeProvider><AppRoot /></ThemeProvider>;
+}
+
+function AppRoot() {
+  const theme = useAppTheme();
+  const [assets, assetError] = useAssets([
+    require('../assets/images/fileo-splash-vertical-hd.png'),
+    require('../assets/images/onboarding-workshop.png'),
+  ]);
+  const [interLoaded] = useInterFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+  const [outfitLoaded] = useOutfitFonts({
+    Outfit_600SemiBold,
+    Outfit_700Bold,
+    Outfit_800ExtraBold,
   });
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
+  const appReady = Boolean(assets) && !assetError && interLoaded && outfitLoaded;
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (appReady) {
+      void SplashScreen.hideAsync();
     }
-  }, [loaded]);
+  }, [appReady]);
 
-  if (!loaded) {
+  useEffect(() => {
+    if (appReady) void SystemUI.setBackgroundColorAsync(theme.colors.background);
+  }, [appReady, theme.colors.background]);
+
+  if (assetError) {
+    throw assetError;
+  }
+
+  if (!appReady) {
     return null;
   }
 
-  return <RootLayoutNav />;
-}
-
-function RootLayoutNav() {
   return (
-    <>
-      <StatusBar style="light" />
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="atelier" options={{ headerShown: false }} />
-      </Stack>
-    </>
+    <SafeAreaProvider>
+      <StatusBar style={theme.colors.statusBar} />
+      <Stack
+        screenOptions={{
+          animation: 'fade',
+          contentStyle: { backgroundColor: theme.colors.background },
+          headerShown: false,
+        }}
+      />
+    </SafeAreaProvider>
   );
 }

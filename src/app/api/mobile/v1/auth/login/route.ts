@@ -1,9 +1,6 @@
-import { recordAudit } from "@/lib/audit";
-import { verifyPassword } from "@/lib/auth/password";
-import { createSessionToken, getSessionByToken, parsePlatformRoles } from "@/lib/auth/session";
-import { collection } from "@/lib/db";
 import { mobileHandler, MobileApiError, ok, parseJsonBody, sessionPayload } from "@/lib/mobile/api";
 import { isCountryCode, parsePhone } from "@/lib/phone";
+import { authErrorCode, getSupabaseSession, signInWithPasswordAndMigrate, writeSupabaseAudit } from "@/lib/supabase/mobile-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +8,6 @@ type LoginBody = {
   country?: string;
   phone?: string;
   password?: string;
-  workshopId?: string | null;
 };
 
 export async function POST(request: Request) {
@@ -25,35 +21,29 @@ export async function POST(request: Request) {
     const phone = parsePhone(rawPhone, country);
     if (!phone.ok) throw new MobileApiError(400, "validation_error", phone.error);
 
-    const users = await collection("users");
-    const user = await users.findOne(
-      { phone_e164: phone.e164 },
-      { projection: { id: 1, password_hash: 1, status: 1, platform_roles: 1 } },
-    );
-    const generic = new MobileApiError(401, "invalid_credentials", "Numero de telephone ou mot de passe incorrect.");
-    if (!user) throw generic;
-    if (!(await verifyPassword(password, String(user.password_hash ?? "")))) throw generic;
-    if (user.status !== "active") throw new MobileApiError(403, "account_disabled", "Ce compte est desactive.");
+    const { data, error } = await signInWithPasswordAndMigrate(phone.e164, password);
+    if (error) {
+      const mapped = authErrorCode(error);
+      throw new MobileApiError(mapped.status, mapped.code, mapped.message);
+    }
+    if (!data.session) throw new MobileApiError(401, "invalid_credentials", "Numero de telephone ou mot de passe incorrect.");
 
-    const { token, expiresAt } = await createSessionToken(String(user.id), {
-      workshopId: body.workshopId ?? null,
-      userAgent: request.headers.get("user-agent"),
-    });
-    await recordAudit({
-      actorUserId: String(user.id),
+    const session = await getSupabaseSession(data.session.access_token);
+    if (!session?.workshop) throw new MobileApiError(403, "workshop_required", "Aucun atelier actif n'est associe a ce compte.");
+    await writeSupabaseAudit({
+      workshopId: session.workshop.id,
+      actorUserId: session.user.id,
       action: "auth.login",
       entityKind: "user",
-      entityId: String(user.id),
-      after: { surface: "mobile", platformRoles: parsePlatformRoles(String(user.platform_roles ?? "[]")) },
+      entityId: session.user.id,
+      after: { surface: "mobile" },
     });
 
-    const session = await getSessionByToken(token);
-    if (!session?.workshop) throw new MobileApiError(403, "workshop_required", "Aucun atelier actif n'est associe a ce compte.");
-
     return ok({
-      token,
+      token: data.session.access_token,
+      refreshToken: data.session.refresh_token,
       tokenType: "Bearer",
-      expiresAt,
+      expiresAt: new Date(data.session.expires_at! * 1000).toISOString(),
       ...sessionPayload(session as typeof session & { workshop: NonNullable<typeof session.workshop> }),
     });
   });

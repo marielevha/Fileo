@@ -1,40 +1,49 @@
 {
   "expo": {
-    "name": "Fileo Mobile",
+    "name": "Filéo",
     "slug": "fileo-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
     "scheme": "fileo",
-    "userInterfaceStyle": "dark",
+    "backgroundColor": "#1F1235",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "output": "static"
     },
     "plugins": [
       "expo-router",
+      "expo-font",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "backgroundColor": "#1F1235",
+          "image": "./assets/images/fileo-splash-vertical-hd.png",
+          "imageWidth": 160,
           "resizeMode": "contain",
-          "backgroundColor": "#13083d",
-          "imageWidth": 104
+          "dark": {
+            "backgroundColor": "#1F1235",
+            "image": "./assets/images/fileo-splash-vertical-hd.png"
+          }
         }
-      ]
+      ],
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Filéo utilise vos photos pour illustrer les commandes et les mensurations.",
+          "cameraPermission": "Filéo utilise l'appareil photo pour ajouter des photos aux commandes et aux mensurations.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

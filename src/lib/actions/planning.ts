@@ -1,14 +1,16 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import { recordAudit } from "@/lib/audit";
 import { requireWorkshop } from "@/lib/auth/guards";
-import { collection, newId, nowIso, withTransaction } from "@/lib/db";
+import { sql, withPgTransaction } from "@/lib/supabase/postgres";
 import { localePath } from "@/lib/i18n/config";
 import { getLocale } from "@/lib/i18n/request";
 import {
   getPlanningItemForUpdate,
   isActivePlanningMember,
+  dbItemStatus,
 } from "@/lib/repos/planning";
 import { ITEM_STATUSES, type ItemStatus } from "@/lib/repos/orders";
 
@@ -75,9 +77,9 @@ export async function updatePlanningItemAction(
     return { success: "Aucun changement à enregistrer." };
   }
 
-  const changedAt = nowIso();
+  const changedAt = new Date().toISOString();
   try {
-    await withTransaction(async (mongoSession) => {
+    await withPgTransaction(async (client) => {
       const deliveredAt = status === "remis"
         ? item.delivered_at ?? changedAt
         : item.status === "remis"
@@ -90,26 +92,21 @@ export async function updatePlanningItemAction(
           : item.cancelled_at;
       const deliveredQuantity = status === "remis" ? item.quantity : item.status === "remis" ? 0 : undefined;
 
-      const items = await collection("order_items");
-      const set: Record<string, unknown> = {
-        status, due_date: dueDate, assignee_user_id: assigneeId,
-        delivered_at: deliveredAt, cancelled_at: cancelledAt, updated_at: changedAt,
-      };
-      if (deliveredQuantity !== undefined) set.delivered_quantity = deliveredQuantity;
-      const result = await items.updateOne(
-        { id: item.item_id, workshop_id: session.workshop.id, row_version: expectedVersion },
-        { $set: set, $inc: { row_version: 1 } },
-        { session: mongoSession },
-      );
-      if (result.modifiedCount !== 1) throw new Error("planning_conflict");
+      const rows = await sql<{id:string}>(`update public.order_items set status=$4,due_date=$5,
+        assignee_user_id=$6,delivered_at=$7,cancelled_at=$8,
+        delivered_quantity=coalesce($9,delivered_quantity),row_version=row_version+1
+        where id=$1 and workshop_id=$2 and row_version=$3 returning id`,[
+        item.item_id,session.workshop.id,expectedVersion,dbItemStatus(status),dueDate,assigneeId,
+        deliveredAt,cancelledAt,deliveredQuantity??null,
+      ],client);
+      if (rows.length !== 1) throw new Error("planning_conflict");
 
       if (dateChanged) {
-        const changes = await collection("order_date_changes");
-        await changes.insertOne({
-          id: newId(), workshop_id: session.workshop.id, order_id: item.order_id,
-          order_item_id: item.item_id, previous_date: item.due_date, new_date: dueDate,
-          reason, changed_by: session.user.id, changed_at: changedAt,
-        }, { session: mongoSession });
+        await sql(`insert into public.order_date_changes
+          (id,workshop_id,order_id,order_item_id,previous_due_date,new_due_date,reason,changed_by,changed_at)
+          values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[
+          randomUUID(),session.workshop.id,item.order_id,item.item_id,item.due_date,dueDate,reason,session.user.id,changedAt,
+        ],client);
         await recordAudit({
           workshopId: session.workshop.id,
           actorUserId: session.user.id,
@@ -119,7 +116,7 @@ export async function updatePlanningItemAction(
           reason,
           before: { dueDate: item.due_date },
           after: { dueDate },
-        }, mongoSession);
+        }, client);
       }
 
       if (statusChanged) {
@@ -132,7 +129,7 @@ export async function updatePlanningItemAction(
           reason: reason || null,
           before: { status: item.status },
           after: { status, deliveredAt },
-        }, mongoSession);
+        }, client);
       }
 
       if (assignmentChanged) {
@@ -144,7 +141,7 @@ export async function updatePlanningItemAction(
           entityId: item.item_id,
           before: { assigneeUserId: item.assignee_user_id },
           after: { assigneeUserId: assigneeId },
-        }, mongoSession);
+        }, client);
       }
     });
   } catch (error) {

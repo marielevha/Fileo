@@ -1,8 +1,9 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { getSessionByToken, type SessionContext } from "@/lib/auth/session";
+import type { SessionContext } from "@/lib/auth/session";
 import { assertWorkshopAbility, PermissionError, type WorkshopAbility } from "@/lib/permissions";
+import { getSupabaseSession } from "@/lib/supabase/mobile-auth";
 
 export class MobileApiError extends Error {
   constructor(
@@ -51,6 +52,30 @@ export async function parseJsonBody<T = Record<string, unknown>>(request: Reques
   }
 }
 
+export async function attachmentFilesFromRequest(request: Request): Promise<File[]> {
+  if (!request.headers.get("content-type")?.includes("application/json")) {
+    const form = await request.formData();
+    return [...form.getAll("files"), ...form.getAll("orderFiles")]
+      .filter((value): value is File => value instanceof File && value.size > 0);
+  }
+
+  const body = await parseJsonBody<{ files?: Array<{ name?: unknown; mimeType?: unknown; dataBase64?: unknown }> }>(request);
+  if (!Array.isArray(body.files) || body.files.length === 0 || body.files.length > 8) {
+    throw new MobileApiError(400, "validation_error", "Ajoutez entre 1 et 8 fichiers.");
+  }
+  return body.files.map((item) => {
+    const name = requiredString(item.name, "Nom du fichier", 180);
+    const mimeType = requiredString(item.mimeType, "Type du fichier", 100);
+    const dataBase64 = typeof item.dataBase64 === "string" ? item.dataBase64 : "";
+    if (!dataBase64 || dataBase64.length > 12 * 1024 * 1024) {
+      throw new MobileApiError(400, "validation_error", `Le fichier ${name} est vide ou trop volumineux.`);
+    }
+    const buffer = Buffer.from(dataBase64, "base64");
+    if (!buffer.length) throw new MobileApiError(400, "validation_error", `Le fichier ${name} est invalide.`);
+    return new File([buffer], name, { type: mimeType });
+  });
+}
+
 export async function requireMobileSession(
   request: Request,
   ability?: WorkshopAbility,
@@ -58,7 +83,7 @@ export async function requireMobileSession(
   const token = bearerToken(request);
   if (!token) throw new MobileApiError(401, "missing_token", "Token Bearer manquant.");
 
-  const session = await getSessionByToken(token);
+  const session = await getSupabaseSession(token);
   if (!session) throw new MobileApiError(401, "invalid_token", "Session invalide ou expiree.");
   if (!session.workshop) throw new MobileApiError(403, "workshop_required", "Aucun atelier actif n'est associe a cette session.");
   if (session.workshop.status === "suspended") {

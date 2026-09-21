@@ -1,12 +1,111 @@
 # Contexte de travail — Filéo
 
 > Document de reprise. À lire en premier au début d'une nouvelle session.
-> Dernière mise à jour : 11 septembre 2026.
+> Dernière mise à jour : 21 septembre 2026.
 
-**Branche active :** `feature/mongodb-integration`, basée sur le commit `5fedf73`.
-Elle contient la conversion de toute la persistance applicative vers MongoDB
-Atlas, basée sur les fonctionnalités clients, commandes, planning et
-encaissements de `feature/dashboard-atelier`.
+**Branche active :** `feature/mobile-api`.
+
+**Architecture active : Supabase.** L'historique MongoDB ci-dessous documente
+une étape antérieure et ne doit plus être interprété comme l'architecture
+d'exécution courante.
+
+---
+
+## Mise à jour du 21 septembre 2026 - application mobile
+
+La branche `feature/mobile-api` contient désormais la refonte de l'application
+Expo et l'extension de l'API mobile. Les sections historiques plus bas décrivent
+des étapes antérieures ; en particulier, les références à une session MongoDB,
+à des écrans mobiles de démonstration ou à un mode hors connexion ne décrivent
+pas le fonctionnement actuel.
+
+- **Base mobile et identité** : remise à plat de l'ancienne application Expo,
+  identité Filéo alignée sur les couleurs du web, polices Inter et Outfit,
+  thèmes clair/sombre, logo et splash natif. Le splash reste visible avant
+  l'onboarding et la transition d'ouverture a été soignée. L'onboarding utilise
+  une illustration bitmap et mène vers les écrans d'authentification.
+- **Authentification** : connexion et inscription natives, navigation
+  login/register sans accumulation d'écrans, persistance optionnelle de la
+  session sur l'appareil, renouvellement des tokens et déconnexion avec
+  révocation côté serveur. Supabase Auth reste le fournisseur d'identité ; le
+  serveur Next.js continue de porter les règles métier et les permissions.
+  Les routes mobiles couvrent aussi inscription, OTP, rafraîchissement de
+  session et réinitialisation du mot de passe. Les OTP SMS ne peuvent pas être
+  activés sans fournisseur SMS configuré sur le projet Supabase.
+- **Accueil et navigation** : tableau de bord mobile alimenté par `bootstrap`,
+  onglets Accueil, Clients, Commandes, Planning et Plus. Les écrans vides,
+  chargements, erreurs et rafraîchissements ont été pris en compte.
+- **Clients et mensurations** : liste avec recherche, filtres, tri et
+  pagination ; création, modification, détail, archivage/restauration et
+  suppression logique. Les relevés de mensurations sont gérés depuis la fiche
+  client, avec pièces jointes et historique. Un client archivé est masqué par
+  défaut mais conservé avec ses commandes.
+- **Commandes** : liste, recherche, filtres, pagination et fiche détaillée.
+  La création suit un wizard en quatre étapes (client, articles, planning et
+  montants, récapitulatif). Dates natives, consignes facultatives, photos et
+  fichiers sont pris en charge. La fiche permet le suivi des articles, les
+  pièces jointes, l'enregistrement d'un encaissement, l'annulation et la
+  clôture sous conditions : tous les articles remis et solde encaissé. Les
+  chiffres et l'historique des encaissements sont dans une même section ; les
+  actions Clôturer et Annuler sont réunies dans un même bloc.
+- **Planning** : vue mobile des échéances et des retards, filtres et actions de
+  mise à jour des articles. Les tuiles redondantes avec l'accueil ont été
+  retirées.
+- **Espace Plus** : profil modifiable (nom), atelier consultable et modifiable
+  par le responsable (nom/ville), gestion paginée de l'équipe et de ses droits,
+  consultation de l'abonnement et déclaration d'un paiement manuel, choix de
+  thème mémorisé, FAQ mobile consultable sans réseau, page À propos, version
+  issue de la configuration Expo et mention « Propulsé par NZELOBI ». La page
+  À propos explique le suivi d'une commande et le travail en équipe. Le
+  paiement MTN MoMo direct n'est pas encore proposé dans le mobile.
+- **API et données** : les endpoints `/api/mobile/v1` utilisent les sessions
+  Supabase, vérifient l'atelier et les capacités côté serveur, puis réutilisent
+  les repositories PostgreSQL. Les ajouts couvrent notamment l'équipe,
+  l'abonnement, le profil et l'atelier, la clôture de commande, le planning,
+  l'archivage client et les pièces jointes. Supabase Storage héberge les
+  fichiers. Les migrations récentes alignent les contenus et ajoutent les
+  pièces jointes de mensurations. Aucun module runtime sous `src` ne dépend
+  de MongoDB ; ses anciens fichiers sont conservés temporairement.
+
+**Points de vigilance** : la FAQ historique du site contient encore des
+réponses obsolètes sur MongoDB et le hors connexion. La FAQ mobile utilise
+donc un contenu dédié et exact pour la V1. Les anciens scripts de contrôle
+qui importent `scripts/mongodb.mjs` doivent être adaptés à Supabase avant
+d'être réutilisés comme tests d'intégration.
+
+**Vérifications effectuées** : TypeScript mobile et web, lint ciblé, export
+Android Expo et requêtes PostgreSQL de lecture seule. Aucun test visuel final
+sur appareil n'a été réalisé et aucun serveur Expo n'est laissé en marche.
+Un build Next.js lancé le 21 septembre a compilé et passé le typage, puis a
+échoué pendant la collecte des pages sur `/faq` (`PageNotFoundError`) alors
+que le module compilé existe ; le manifeste `.next/server/app-paths-manifest`
+était incomplet. Refaire un build dans un répertoire de sortie isolé ou avec
+les autres processus Next arrêtés avant de conclure à une régression du code.
+
+---
+
+## Mise a jour Codex - 19 septembre 2026 - runtime Supabase
+
+- Toute la couche applicative sous `src` utilise maintenant PostgreSQL
+  Supabase : clients, mesures, commandes, planning, encaissements, dashboard,
+  équipe, abonnements, administration, contenus, audit et métadonnées Storage.
+- `src/lib/supabase/postgres.ts` fournit le pool PostgreSQL mutualisé, les
+  requêtes paramétrées et les transactions.
+- L'authentification web et mobile utilise Supabase Auth et les JWT Supabase.
+- Les comptes historiques sont migrés progressivement au premier login :
+  validation de l'ancien hash stocké dans `app_users`, création de l'identité
+  Supabase Auth, liaison de `auth_user_id`, puis suppression du hash legacy.
+- Le fournisseur téléphone est actuellement désactivé dans le projet Supabase
+  (`phone_provider_disabled`). Une adresse technique interne dérivée du
+  numéro sert donc d'identifiant Supabase Auth pour garder les connexions
+  fonctionnelles. Les OTP SMS natifs nécessitent encore l'activation et la
+  configuration d'un fournisseur SMS dans Supabase.
+- MongoDB, `src/lib/db/index.ts` et les scripts Atlas sont conservés
+  temporairement, à la demande du projet, mais aucun module runtime sous
+  `src` ne les importe encore.
+- Vérifications réalisées : TypeScript, build Next de production, connexion
+  PostgreSQL Supabase, login d'un compte historique, API mobile et pages
+  atelier principales.
 
 ---
 

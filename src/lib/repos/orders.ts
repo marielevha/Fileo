@@ -1,446 +1,102 @@
 import "server-only";
-
-import type { ClientSession } from "mongodb";
-import { recordAudit } from "@/lib/audit";
-import { collection, newId, nowIso, withTransaction } from "@/lib/db";
-import {
-  computeOrderBalance,
-  money,
-  multiply,
-  type CurrencyCode,
-  type Money,
-  type OrderBalance,
-} from "@/lib/money";
-
-export const ITEM_STATUSES = [
-  "a_realiser", "en_cours", "a_essayer", "pret", "remis", "annule",
-] as const;
-
-export type ItemStatus = (typeof ITEM_STATUSES)[number];
-
-export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
-  a_realiser: "À réaliser",
-  en_cours: "En cours",
-  a_essayer: "À essayer",
-  pret: "Prêt",
-  remis: "Remis",
-  annule: "Annulé",
-};
-
-export type OrderState =
-  | "nouvelle" | "en_cours" | "prete" | "partiellement_remise" | "remise" | "annulee";
-
-export const ORDER_STATE_LABELS: Record<OrderState, string> = {
-  nouvelle: "Nouvelle",
-  en_cours: "En cours",
-  prete: "Prête",
-  partiellement_remise: "Partiellement remise",
-  remise: "Remise",
-  annulee: "Annulée",
-};
-
-export type OrderItemRow = {
-  id: string;
-  order_id: string;
-  category: string;
-  description: string;
-  work_type?: string | null;
-  wearer_name: string | null;
-  wearer_relation: string | null;
-  quantity: number;
-  unit_price_amount: number;
-  currency: string;
-  status: string;
-  due_date: string | null;
-  delivered_quantity: number;
-  assignee_user_id: string | null;
-  measurement_snapshot: string | null;
-};
-
-export type OrderRow = {
-  id: string;
-  workshop_id: string;
-  client_id: string;
-  client_name: string;
-  reference: string;
-  currency: string;
-  discount_amount: number;
-  discount_reason: string | null;
-  instructions: string | null;
-  promised_date: string | null;
-  fitting_date: string | null;
-  cancelled_at: string | null;
-  created_at: string;
-};
-
-export type OrderSummary = {
-  order: OrderRow;
-  items: OrderItemRow[];
-  state: OrderState;
-  balance: OrderBalance | null;
-  isLate: boolean;
-};
-
-export type OrderPage = {
-  items: OrderSummary[];
-  total: number;
-  page: number;
-  pageSize: number;
-  pageCount: number;
-};
-
-export type InitialPaymentMethod = "cash" | "mobile_money" | "transfer" | "other";
-export type OrderItemWorkType = "creation" | "retouche";
-
-export type CreateOrderItemInput = {
-  category: string;
-  description: string;
-  workType: OrderItemWorkType;
-  wearerName?: string | null;
-  wearerRelation?: string | null;
-  quantity: number;
-  unitPrice: Money;
-  dueDate?: string | null;
-  assigneeUserId?: string | null;
-  measurementValues?: Record<string, string>;
-  measurementNotes?: string | null;
-};
-
-export type CreateOrderInput = {
-  workshopId: string;
-  actorUserId: string;
-  clientId: string;
-  currency: CurrencyCode;
-  discount: Money;
-  discountReason?: string | null;
-  instructions?: string | null;
-  promisedDate?: string | null;
-  fittingDate?: string | null;
-  items: CreateOrderItemInput[];
-  initialPayment?: {
-    amount: Money;
-    method: InitialPaymentMethod;
-    reference?: string | null;
-    effectiveDate: string;
-    idempotencyKey: string;
-  } | null;
-};
-
-export type CreateOrderResult = {
-  orderId: string;
-  reference: string;
-};
-
-export class OrderWriteError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "OrderWriteError";
-  }
+import {randomUUID} from "node:crypto";
+import {recordAudit} from "@/lib/audit";
+import {sql,sqlOne,withPgTransaction,type PgExecutor} from "@/lib/supabase/postgres";
+import {computeOrderBalance,money,multiply,type CurrencyCode,type Money,type OrderBalance} from "@/lib/money";
+export const ITEM_STATUSES=["a_realiser","en_cours","a_essayer","pret","remis","annule"] as const;
+export type ItemStatus=(typeof ITEM_STATUSES)[number];
+export const ITEM_STATUS_LABELS:Record<ItemStatus,string>={a_realiser:"A realiser",en_cours:"En cours",a_essayer:"A essayer",pret:"Pret",remis:"Remis",annule:"Annule"};
+export type OrderState="nouvelle"|"en_cours"|"prete"|"partiellement_remise"|"remise"|"annulee";
+export const ORDER_STATE_LABELS:Record<OrderState,string>={nouvelle:"Nouvelle",en_cours:"En cours",prete:"Prete",partiellement_remise:"Partiellement remise",remise:"Remise",annulee:"Annulee"};
+export type OrderItemRow={id:string;order_id:string;category:string;description:string;work_type?:string|null;wearer_name:string|null;wearer_relation:string|null;quantity:number;unit_price_amount:number;currency:string;status:string;due_date:string|null;delivered_quantity:number;assignee_user_id:string|null;measurement_snapshot:string|null;row_version:number};
+export type OrderRow={id:string;workshop_id:string;client_id:string;client_name:string;reference:string;currency:string;discount_amount:number;discount_reason:string|null;instructions:string|null;promised_date:string|null;fitting_date:string|null;cancelled_at:string|null;created_at:string};
+export type OrderSummary={order:OrderRow;items:OrderItemRow[];state:OrderState;balance:OrderBalance|null;isLate:boolean};
+export type OrderPage={items:OrderSummary[];total:number;page:number;pageSize:number;pageCount:number};
+export type OrderFilter="all"|"late"|OrderState;
+export type InitialPaymentMethod="cash"|"mobile_money"|"transfer"|"other";export type OrderItemWorkType="creation"|"retouche";
+export type CreateOrderItemInput={category:string;description:string;workType:OrderItemWorkType;wearerName?:string|null;wearerRelation?:string|null;quantity:number;unitPrice:Money;dueDate?:string|null;assigneeUserId?:string|null;measurementValues?:Record<string,string>;measurementNotes?:string|null};
+export type CreateOrderInput={workshopId:string;actorUserId:string;clientId:string;currency:CurrencyCode;discount:Money;discountReason?:string|null;instructions?:string|null;promisedDate?:string|null;fittingDate?:string|null;items:CreateOrderItemInput[];initialPayment?:{amount:Money;method:InitialPaymentMethod;reference?:string|null;effectiveDate:string;idempotencyKey:string}|null};
+export type CreateOrderResult={orderId:string;reference:string};
+export class OrderWriteError extends Error{constructor(message:string){super(message);this.name="OrderWriteError";}}
+const statusCase=`case status when 'todo' then 'a_realiser' when 'in_progress' then 'en_cours' when 'fitting' then 'a_essayer' when 'ready' then 'pret' when 'delivered' then 'remis' else 'annule' end`;
+export function deriveOrderState(order:OrderRow,items:OrderItemRow[]):OrderState{if(order.cancelled_at)return"annulee";const live=items.filter(i=>i.status!=="annule");if(!live.length)return items.length?"annulee":"nouvelle";const delivered=live.filter(i=>i.status==="remis");if(delivered.length===live.length)return"remise";if(delivered.length)return"partiellement_remise";if(live.every(i=>i.status==="pret"))return"prete";if(live.some(i=>i.status!=="a_realiser"))return"en_cours";return"nouvelle";}
+export function isOrderLate(order:OrderRow,items:OrderItemRow[],today=new Date()):boolean{if(order.cancelled_at)return false;const day=today.toISOString().slice(0,10);return items.some(i=>i.status!=="remis"&&i.status!=="annule"&&Boolean(i.due_date??order.promised_date)&&(i.due_date??order.promised_date)!<day);}
+const lineTotals=(items:OrderItemRow[],currency:CurrencyCode)=>items.filter(i=>i.status!=="annule").map(i=>multiply(money(i.unit_price_amount,currency),i.quantity));
+async function orderItems(orderId:string,executor?:PgExecutor){return sql<OrderItemRow>(`select id,order_id,category,coalesce(description,'') description,work_type,wearer_name,wearer_relation,quantity,coalesce(unit_price_amount,0)::int unit_price_amount,currency,${statusCase} status,due_date::text due_date,delivered_quantity,assignee_user_id,measurement_snapshot::text,row_version from public.order_items where order_id=$1 order by sort_order,created_at`,[orderId],executor);}
+export async function getOrderBalance(orderId:string,currency:CurrencyCode):Promise<OrderBalance>{const [items,order,movements]=await Promise.all([orderItems(orderId),sqlOne<{discount_amount:number}>("select discount_amount from public.orders where id=$1",[orderId]),sql<{kind:string;amount:number}>("select kind,amount from public.financial_movements where order_id=$1 and status='confirmed'",[orderId])]);return computeOrderBalance({currency,lineTotals:lineTotals(items,currency),discount:money(order?.discount_amount??0,currency),confirmedPayments:movements.filter(x=>x.kind==="payment").map(x=>money(x.amount,currency)),confirmedRefunds:movements.filter(x=>x.kind==="refund").map(x=>money(x.amount,currency))});}
+const orderSelect=`o.id,o.workshop_id,o.client_id,coalesce(c.display_name,'Client supprime') client_name,o.reference,o.currency,o.discount_amount,o.discount_reason,o.instructions,o.promised_date::text promised_date,o.fitting_date::text fitting_date,o.cancelled_at,o.created_at`;
+async function buildSummary(order:OrderRow,includeMoney:boolean):Promise<OrderSummary>{const items=await orderItems(order.id);return{order,items:includeMoney?items:items.map(i=>({...i,unit_price_amount:0})),state:deriveOrderState(order,items),balance:includeMoney?await getOrderBalance(order.id,order.currency as CurrencyCode):null,isLate:isOrderLate(order,items)};}
+export async function listOrders(workshopId:string,options:{includeMoney:boolean;limit?:number;clientId?:string}):Promise<OrderSummary[]>{const rows=await sql<OrderRow>(`select ${orderSelect} from public.orders o left join public.clients c on c.id=o.client_id where o.workshop_id=$1 and ($2::uuid is null or o.client_id=$2) order by o.created_at desc limit $3`,[workshopId,options.clientId??null,options.limit??100]);return Promise.all(rows.map(x=>buildSummary(x,options.includeMoney)));}
+export async function listOrdersPage(workshopId:string,options:{includeMoney:boolean;search?:string;filter?:OrderFilter;page?:number;pageSize?:number}):Promise<OrderPage>{
+ const pageSize=Math.min(50,Math.max(1,Math.trunc(options.pageSize??10))),requestedPage=Math.max(1,Math.trunc(options.page??1));
+ const values:unknown[]=[workshopId],where=["o.workshop_id=$1"];
+ if(options.search?.trim()){values.push(`%${options.search.trim()}%`);where.push(`(o.reference ilike $${values.length} or c.display_name ilike $${values.length} or exists(select 1 from public.order_items si where si.order_id=o.id and (si.description ilike $${values.length} or si.category ilike $${values.length})))`);}
+ const stateExpression=`case when o.cancelled_at is not null then 'annulee' when stats.live_count=0 then case when stats.total_count>0 then 'annulee' else 'nouvelle' end when stats.delivered_count=stats.live_count then 'remise' when stats.delivered_count>0 then 'partiellement_remise' when stats.ready_count=stats.live_count then 'prete' when stats.progressed_count>0 then 'en_cours' else 'nouvelle' end`;
+ const lateExpression=`(o.cancelled_at is null and stats.late_count>0)`;
+ const filter=options.filter??"all";
+ if(filter==="late")where.push(lateExpression);else if(filter!=="all"){values.push(filter);where.push(`${stateExpression}=$${values.length}`);}
+ const from=`from public.orders o left join public.clients c on c.id=o.client_id cross join lateral(select count(*)::int total_count,count(*) filter(where i.status<>'cancelled')::int live_count,count(*) filter(where i.status='delivered')::int delivered_count,count(*) filter(where i.status='ready')::int ready_count,count(*) filter(where i.status not in('todo','cancelled'))::int progressed_count,count(*) filter(where i.status not in('delivered','cancelled') and coalesce(i.due_date,o.promised_date)<current_date)::int late_count from public.order_items i where i.order_id=o.id) stats where ${where.join(" and ")}`;
+ const count=await sqlOne<{total:number}>(`select count(*)::int total ${from}`,values),total=count?.total??0,pageCount=Math.max(1,Math.ceil(total/pageSize)),page=Math.min(pageCount,requestedPage);
+ const pageValues=[...values,pageSize,(page-1)*pageSize];
+ const rows=await sql<OrderRow>(`select ${orderSelect} ${from} order by o.created_at desc,o.id desc limit $${pageValues.length-1} offset $${pageValues.length}`,pageValues);
+ return{items:await Promise.all(rows.map(x=>buildSummary(x,options.includeMoney))),total,page,pageSize,pageCount};
 }
-
-export function deriveOrderState(order: OrderRow, items: OrderItemRow[]): OrderState {
-  if (order.cancelled_at) return "annulee";
-  const live = items.filter((item) => item.status !== "annule");
-  if (live.length === 0) return items.length > 0 ? "annulee" : "nouvelle";
-  const delivered = live.filter((item) => item.status === "remis");
-  if (delivered.length === live.length) return "remise";
-  if (delivered.length > 0) return "partiellement_remise";
-  if (live.every((item) => item.status === "pret")) return "prete";
-  if (live.some((item) => item.status !== "a_realiser")) return "en_cours";
-  return "nouvelle";
+export async function getOrder(workshopId:string,orderId:string,includeMoney:boolean):Promise<OrderSummary|null>{const row=await sqlOne<OrderRow>(`select ${orderSelect} from public.orders o left join public.clients c on c.id=o.client_id where o.workshop_id=$1 and o.id=$2`,[workshopId,orderId]);return row?buildSummary(row,includeMoney):null;}
+export async function closeOrder(input:{workshopId:string;orderId:string;actorUserId:string}):Promise<"closed"|"already_closed"|"not_found">{
+ return withPgTransaction(async client=>{
+  const order=await sqlOne<{id:string;currency:CurrencyCode;discount_amount:number;cancelled_at:string|null}>("select id,currency,discount_amount,cancelled_at from public.orders where workshop_id=$1 and id=$2 for update",[input.workshopId,input.orderId],client);
+  if(!order)return"not_found";
+  if(order.cancelled_at)throw new OrderWriteError("Une commande annulee ne peut pas etre cloturee.");
+  const items=await sql<{id:string;status:string;quantity:number;unit_price_amount:number}>("select id,status,quantity,unit_price_amount from public.order_items where workshop_id=$1 and order_id=$2 order by id for update",[input.workshopId,input.orderId],client);
+  const active=items.filter(item=>item.status!=="cancelled");
+  if(!active.length)throw new OrderWriteError("Cette commande ne contient aucun article actif.");
+  const movements=await sql<{kind:string;amount:number}>("select kind,amount from public.financial_movements where workshop_id=$1 and order_id=$2 and status='confirmed'",[input.workshopId,input.orderId],client);
+  const balance=computeOrderBalance({currency:order.currency,lineTotals:active.map(item=>multiply(money(item.unit_price_amount,order.currency),item.quantity)),discount:money(order.discount_amount,order.currency),confirmedPayments:movements.filter(item=>item.kind==="payment").map(item=>money(item.amount,order.currency)),confirmedRefunds:movements.filter(item=>item.kind==="refund").map(item=>money(item.amount,order.currency))});
+  if(balance.remainingDue.amount>0)throw new OrderWriteError(`Il reste ${balance.remainingDue.amount} ${order.currency} a encaisser avant la cloture.`);
+  const pending=active.filter(item=>item.status!=="delivered");
+  if(!pending.length)return"already_closed";
+  await sql("update public.order_items set status='delivered',delivered_at=coalesce(delivered_at,now()),delivered_quantity=quantity,row_version=row_version+1 where workshop_id=$1 and order_id=$2 and status not in('delivered','cancelled')",[input.workshopId,input.orderId],client);
+  await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"order.close",entityKind:"order",entityId:input.orderId,after:{deliveredItemIds:pending.map(item=>item.id),remainingDue:0}},client);
+  return"closed";
+ });
 }
-
-export function isOrderLate(order: OrderRow, items: OrderItemRow[], today = new Date()): boolean {
-  if (order.cancelled_at) return false;
-  const day = today.toISOString().slice(0, 10);
-  return items.some((item) => {
-    if (item.status === "remis" || item.status === "annule") return false;
-    const due = item.due_date ?? order.promised_date;
-    return Boolean(due) && due! < day;
-  });
+export async function updateOrderDetails(input:{workshopId:string;orderId:string;actorUserId:string;promisedDate:string|null;fittingDate:string|null;instructions:string|null}):Promise<boolean>{return withPgTransaction(async client=>{const before=await sqlOne<OrderRow>(`select ${orderSelect} from public.orders o left join public.clients c on c.id=o.client_id where o.workshop_id=$1 and o.id=$2 for update of o`,[input.workshopId,input.orderId],client);if(!before)return false;await sql("update public.orders set promised_date=$3,fitting_date=$4,instructions=$5,row_version=row_version+1 where workshop_id=$1 and id=$2",[input.workshopId,input.orderId,input.promisedDate,input.fittingDate,input.instructions],client);await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"order.update",entityKind:"order",entityId:input.orderId,before:{promisedDate:before.promised_date,fittingDate:before.fitting_date,instructions:before.instructions},after:{promisedDate:input.promisedDate,fittingDate:input.fittingDate,instructions:input.instructions}},client);return true;});}
+export async function cancelOrder(input:{workshopId:string;orderId:string;actorUserId:string;reason:string}):Promise<boolean>{if(input.reason.trim().length<3)throw new OrderWriteError("Indiquez un motif d'au moins 3 caracteres.");return withPgTransaction(async client=>{const order=await sqlOne<{id:string;cancelled_at:string|null}>("select id,cancelled_at from public.orders where workshop_id=$1 and id=$2 for update",[input.workshopId,input.orderId],client);if(!order)return false;if(order.cancelled_at)return true;const timestamp=new Date().toISOString();await sql("update public.orders set cancelled_at=$3,row_version=row_version+1 where workshop_id=$1 and id=$2",[input.workshopId,input.orderId,timestamp],client);await sql("update public.order_items set status='cancelled',cancelled_at=coalesce(cancelled_at,$3),row_version=row_version+1 where workshop_id=$1 and order_id=$2 and status not in('delivered','cancelled')",[input.workshopId,input.orderId,timestamp],client);await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"order.cancel",entityKind:"order",entityId:input.orderId,reason:input.reason.trim(),before:{cancelledAt:null},after:{cancelledAt:timestamp}},client);return true;});}
+const dbStatus=(status:ItemStatus)=>({a_realiser:"todo",en_cours:"in_progress",a_essayer:"fitting",pret:"ready",remis:"delivered",annule:"cancelled"} as const)[status];
+const statusRank:Record<ItemStatus,number>={a_realiser:0,en_cours:1,a_essayer:2,pret:3,remis:4,annule:5};
+export async function updateOrderItem(input:{workshopId:string;orderId:string;itemId:string;actorUserId:string;status:ItemStatus;dueDate:string|null;reason:string;expectedVersion:number;assigneeId?:string|null}):Promise<"updated"|"not_found"|"conflict">{
+ return withPgTransaction(async client=>{
+  const item=await sqlOne<{id:string;status:ItemStatus;due_date:string|null;delivered_at:string|null;cancelled_at:string|null;quantity:number;row_version:number;assignee_user_id:string|null}>(`select i.id,${statusCase} status,i.due_date::text due_date,i.delivered_at,i.cancelled_at,i.quantity,i.row_version,i.assignee_user_id from public.order_items i join public.orders o on o.id=i.order_id where i.workshop_id=$1 and i.order_id=$2 and i.id=$3 and o.cancelled_at is null for update of i`,[input.workshopId,input.orderId,input.itemId],client);
+  if(!item)return"not_found";if(item.row_version!==input.expectedVersion)return"conflict";
+  const assigneeId=input.assigneeId===undefined?item.assignee_user_id:input.assigneeId;
+  const dateChanged=item.due_date!==input.dueDate,statusChanged=item.status!==input.status,assignmentChanged=item.assignee_user_id!==assigneeId,isBackward=statusChanged&&statusRank[input.status]<statusRank[item.status],needsReason=dateChanged||isBackward||input.status==="annule"||item.status==="annule";
+  if(needsReason&&input.reason.trim().length<3)throw new OrderWriteError("Indiquez un motif d'au moins 3 caracteres pour ce changement.");
+  if(!dateChanged&&!statusChanged&&!assignmentChanged)return"updated";
+  const timestamp=new Date().toISOString(),deliveredAt=input.status==="remis"?(item.delivered_at??timestamp):(item.status==="remis"?null:item.delivered_at),cancelledAt=input.status==="annule"?(item.cancelled_at??timestamp):(item.status==="annule"?null:item.cancelled_at),deliveredQuantity=input.status==="remis"?item.quantity:(item.status==="remis"?0:null);
+  const rows=await sql<{id:string}>("update public.order_items set status=$4,due_date=$5,delivered_at=$6,cancelled_at=$7,delivered_quantity=coalesce($8,delivered_quantity),assignee_user_id=$9,row_version=row_version+1 where workshop_id=$1 and order_id=$2 and id=$3 and row_version=$10 returning id",[input.workshopId,input.orderId,input.itemId,dbStatus(input.status),input.dueDate,deliveredAt,cancelledAt,deliveredQuantity,assigneeId,input.expectedVersion],client);
+  if(rows.length!==1)return"conflict";
+  if(dateChanged)await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"order.date_change",entityKind:"order_item",entityId:input.itemId,reason:input.reason.trim(),before:{dueDate:item.due_date},after:{dueDate:input.dueDate}},client);
+  if(statusChanged)await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"item.status_change",entityKind:"order_item",entityId:input.itemId,reason:input.reason.trim()||null,before:{status:item.status},after:{status:input.status,deliveredAt}},client);
+  if(assignmentChanged)await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"item.update",entityKind:"order_item",entityId:input.itemId,before:{assigneeUserId:item.assignee_user_id},after:{assigneeUserId:assigneeId}},client);
+  return"updated";
+ });
 }
-
-function lineTotals(items: OrderItemRow[], currency: CurrencyCode): Money[] {
-  return items
-    .filter((item) => item.status !== "annule")
-    .map((item) => multiply(money(item.unit_price_amount, currency), item.quantity));
+export async function nextOrderReference(workshopId:string):Promise<string>{const r=await sqlOne<{total:number}>("select count(*)::int total from public.orders where workshop_id=$1",[workshopId]);return`CMD-${String((r?.total??0)+1).padStart(4,"0")}`;}
+const methodDb=(m:InitialPaymentMethod)=>m==="transfer"?"bank_transfer":m;
+export async function createOrder(input:CreateOrderInput):Promise<CreateOrderResult>{
+ if(!input.items.length)throw new OrderWriteError("Ajoutez au moins un article a la commande.");
+ if(input.discount.currency!==input.currency||input.discount.amount<0)throw new OrderWriteError("La reduction est invalide.");
+ if(input.initialPayment&&(input.initialPayment.amount.currency!==input.currency||input.initialPayment.amount.amount<=0))throw new OrderWriteError("L'acompte est invalide.");
+ return withPgTransaction(async client=>{
+  if(!await sqlOne("select id from public.clients where id=$1 and workshop_id=$2 and deleted_at is null for update",[input.clientId,input.workshopId],client))throw new OrderWriteError("Ce client n'existe plus ou n'est pas accessible.");
+  await sql("select pg_advisory_xact_lock(hashtext($1))",[input.workshopId],client);
+  const r=await sqlOne<{total:number}>("select count(*)::int total from public.orders where workshop_id=$1",[input.workshopId],client);
+  const reference=`CMD-${String((r?.total??0)+1).padStart(4,"0")}`,orderId=randomUUID(),timestamp=new Date().toISOString();
+  await sql(`insert into public.orders(id,workshop_id,client_id,reference,currency,discount_amount,discount_reason,instructions,promised_date,fitting_date,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[orderId,input.workshopId,input.clientId,reference,input.currency,input.discount.amount,input.discountReason??null,input.instructions??null,input.promisedDate??null,input.fittingDate??null,input.actorUserId],client);
+  for(const [index,item] of input.items.entries())await sql(`insert into public.order_items(id,workshop_id,order_id,category,description,work_type,wearer_name,wearer_relation,quantity,unit_price_amount,currency,status,due_date,assignee_user_id,measurement_snapshot,sort_order) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'todo',$12,$13,$14::jsonb,$15)`,[randomUUID(),input.workshopId,orderId,item.category.trim(),item.description.trim(),item.workType,item.wearerName?.trim()||null,item.wearerRelation?.trim()||null,item.quantity,item.unitPrice.amount,input.currency,item.dueDate??input.promisedDate??null,item.assigneeUserId??null,serialiseItemMeasurements({wearerName:item.wearerName,wearerRelation:item.wearerRelation,values:item.measurementValues,notes:item.measurementNotes,capturedAt:timestamp.slice(0,10)}),index+1],client);
+  await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"order.create",entityKind:"order",entityId:orderId,after:{reference,clientId:input.clientId,itemCount:input.items.length,discountAmount:input.discount.amount}},client);
+  if(input.initialPayment){const movementId=randomUUID();try{await sql(`insert into public.financial_movements(id,workshop_id,order_id,kind,amount,currency,method,reference,effective_date,status,idempotency_key,created_by) values($1,$2,$3,'payment',$4,$5,$6,$7,$8,'confirmed',$9,$10)`,[movementId,input.workshopId,orderId,input.initialPayment.amount.amount,input.currency,methodDb(input.initialPayment.method),input.initialPayment.reference??null,input.initialPayment.effectiveDate,input.initialPayment.idempotencyKey,input.actorUserId],client);}catch(e){if((e as {code?:string}).code==="23505")throw new OrderWriteError("Cette tentative d'encaissement a deja ete utilisee. Rechargez la page.");throw e;}await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"payment.record",entityKind:"financial_movement",entityId:movementId,after:{orderId,amount:input.initialPayment.amount.amount,currency:input.currency,method:input.initialPayment.method}},client);}
+  return{orderId,reference};
+ });
 }
-
-export async function getOrderBalance(orderId: string, currency: CurrencyCode): Promise<OrderBalance> {
-  const itemsCollection = await collection("order_items");
-  const orders = await collection("orders");
-  const movements = await collection("financial_movements");
-  const [items, order, movementRows] = await Promise.all([
-    itemsCollection.find({ order_id: orderId }, { projection: { _id: 0 } })
-      .sort({ sort_order: 1, created_at: 1 }).toArray() as unknown as Promise<OrderItemRow[]>,
-    orders.findOne({ id: orderId }, { projection: { discount_amount: 1 } }),
-    movements.find({ order_id: orderId, status: "confirmed" }, { projection: { kind: 1, amount: 1 } }).toArray(),
-  ]);
-  return computeOrderBalance({
-    currency,
-    lineTotals: lineTotals(items, currency),
-    discount: money(Number(order?.discount_amount ?? 0), currency),
-    confirmedPayments: movementRows.filter((row) => row.kind === "payment").map((row) => money(Number(row.amount), currency)),
-    confirmedRefunds: movementRows.filter((row) => row.kind === "refund").map((row) => money(Number(row.amount), currency)),
-  });
-}
-
-async function attachClientNames(rows: Record<string, unknown>[]): Promise<OrderRow[]> {
-  if (rows.length === 0) return [];
-  const clients = await collection("clients");
-  const ids = [...new Set(rows.map((row) => String(row.client_id)))];
-  const names = await clients.find(
-    { id: { $in: ids } },
-    { projection: { _id: 0, id: 1, display_name: 1 } },
-  ).toArray();
-  const byId = new Map(names.map((client) => [String(client.id), String(client.display_name)]));
-  return rows.map((row) => ({ ...row, client_name: byId.get(String(row.client_id)) ?? "Client supprimé" })) as OrderRow[];
-}
-
-export async function listOrders(
-  workshopId: string,
-  options: { includeMoney: boolean; limit?: number; clientId?: string },
-): Promise<OrderSummary[]> {
-  const orders = await collection("orders");
-  const filter = { workshop_id: workshopId, ...(options.clientId ? { client_id: options.clientId } : {}) };
-  const raw = await orders.find(filter, { projection: { _id: 0 } })
-    .sort({ created_at: -1 }).limit(options.limit ?? 100).toArray();
-  const rows = await attachClientNames(raw);
-  return Promise.all(rows.map((order) => buildSummary(order, options.includeMoney)));
-}
-
-export async function listOrdersPage(
-  workshopId: string,
-  options: { includeMoney: boolean; page?: number; pageSize?: number },
-): Promise<OrderPage> {
-  const orders = await collection("orders");
-  const pageSize = Math.min(50, Math.max(1, Math.trunc(options.pageSize ?? 10)));
-  const total = await orders.countDocuments({ workshop_id: workshopId });
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const page = Math.min(pageCount, Math.max(1, Math.trunc(options.page ?? 1)));
-  const raw = await orders.find({ workshop_id: workshopId }, { projection: { _id: 0 } })
-    .sort({ created_at: -1, id: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray();
-  const rows = await attachClientNames(raw);
-  return {
-    items: await Promise.all(rows.map((order) => buildSummary(order, options.includeMoney))),
-    total, page, pageSize, pageCount,
-  };
-}
-
-export async function getOrder(
-  workshopId: string,
-  orderId: string,
-  includeMoney: boolean,
-): Promise<OrderSummary | null> {
-  const orders = await collection("orders");
-  const raw = await orders.findOne(
-    { workshop_id: workshopId, id: orderId },
-    { projection: { _id: 0 } },
-  );
-  if (!raw) return null;
-  const [order] = await attachClientNames([raw]);
-  return buildSummary(order, includeMoney);
-}
-
-async function buildSummary(order: OrderRow, includeMoney: boolean): Promise<OrderSummary> {
-  const itemsCollection = await collection("order_items");
-  const items = await itemsCollection.find(
-    { order_id: order.id },
-    { projection: { _id: 0 } },
-  ).sort({ sort_order: 1, created_at: 1 }).toArray() as unknown as OrderItemRow[];
-  const currency = order.currency as CurrencyCode;
-  return {
-    order,
-    items: includeMoney ? items : items.map((item) => ({ ...item, unit_price_amount: 0 })),
-    state: deriveOrderState(order, items),
-    balance: includeMoney ? await getOrderBalance(order.id, currency) : null,
-    isLate: isOrderLate(order, items),
-  };
-}
-
-export async function nextOrderReference(workshopId: string): Promise<string> {
-  const orders = await collection("orders");
-  const total = await orders.countDocuments({ workshop_id: workshopId });
-  return `CMD-${String(total + 1).padStart(4, "0")}`;
-}
-
-export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
-  if (input.items.length === 0) {
-    throw new OrderWriteError("Ajoutez au moins un article a la commande.");
-  }
-  if (input.discount.currency !== input.currency) {
-    throw new OrderWriteError("La reduction doit utiliser la devise de la commande.");
-  }
-  if (input.discount.amount < 0) {
-    throw new OrderWriteError("La reduction ne peut pas etre negative.");
-  }
-  if (input.initialPayment) {
-    if (input.initialPayment.amount.currency !== input.currency) {
-      throw new OrderWriteError("L'acompte doit utiliser la devise de la commande.");
-    }
-    if (input.initialPayment.amount.amount <= 0) {
-      throw new OrderWriteError("L'acompte doit etre strictement positif.");
-    }
-  }
-
-  return withTransaction(async (session) => {
-    const clients = await collection("clients");
-    const orders = await collection("orders");
-    const orderItems = await collection("order_items");
-    const movements = await collection("financial_movements");
-
-    const client = await clients.findOne(
-      { id: input.clientId, workshop_id: input.workshopId, deleted_at: null },
-      { projection: { id: 1, display_name: 1 }, session },
-    );
-    if (!client) {
-      throw new OrderWriteError("Ce client n'existe plus ou n'est pas accessible.");
-    }
-
-    const reference = await nextOrderReferenceInSession(input.workshopId, session);
-    const orderId = newId();
-    const timestamp = nowIso();
-
-    await orders.insertOne({
-      id: orderId,
-      workshop_id: input.workshopId,
-      client_id: input.clientId,
-      reference,
-      currency: input.currency,
-      discount_amount: input.discount.amount,
-      discount_reason: input.discountReason ?? null,
-      instructions: input.instructions ?? null,
-      promised_date: input.promisedDate ?? null,
-      fitting_date: input.fittingDate ?? null,
-      cancelled_at: null,
-      created_by: input.actorUserId,
-      created_at: timestamp,
-      updated_at: timestamp,
-      row_version: 1,
-    }, { session });
-
-    const rows = input.items.map((item, index) => {
-      return {
-        id: newId(),
-        workshop_id: input.workshopId,
-        order_id: orderId,
-        category: item.category.trim(),
-        description: item.description.trim(),
-        work_type: item.workType,
-        wearer_name: item.wearerName?.trim() || null,
-        wearer_relation: item.wearerRelation?.trim() || null,
-        quantity: item.quantity,
-        unit_price_amount: item.unitPrice.amount,
-        currency: input.currency,
-        status: "a_realiser",
-        due_date: item.dueDate ?? input.promisedDate ?? null,
-        delivered_quantity: 0,
-        delivered_at: null,
-        assignee_user_id: item.assigneeUserId ?? null,
-        measurement_snapshot: serialiseItemMeasurements({
-          wearerName: item.wearerName,
-          wearerRelation: item.wearerRelation,
-          values: item.measurementValues,
-          notes: item.measurementNotes,
-          capturedAt: timestamp.slice(0, 10),
-        }),
-        cancelled_at: null,
-        sort_order: index + 1,
-        created_at: timestamp,
-        updated_at: timestamp,
-        row_version: 1,
-      };
-    });
-    await orderItems.insertMany(rows, { session });
-
-    await recordAudit({
-      workshopId: input.workshopId,
-      actorUserId: input.actorUserId,
-      action: "order.create",
-      entityKind: "order",
-      entityId: orderId,
-      after: {
-        reference,
-        clientId: input.clientId,
-        itemCount: input.items.length,
-        discountAmount: input.discount.amount,
-      },
-    }, session);
-
-    if (input.initialPayment) {
-      const existing = await movements.findOne(
-        { workshop_id: input.workshopId, idempotency_key: input.initialPayment.idempotencyKey },
-        { session },
-      );
-      if (existing) {
-        throw new OrderWriteError("Cette tentative d'encaissement a deja ete utilisee. Rechargez la page.");
-      }
-
-      const movementId = newId();
-      await movements.insertOne({
-        id: movementId,
-        workshop_id: input.workshopId,
-        order_id: orderId,
-        kind: "payment",
-        amount: input.initialPayment.amount.amount,
-        currency: input.currency,
-        method: input.initialPayment.method,
-        reference: input.initialPayment.reference ?? null,
-        effective_date: input.initialPayment.effectiveDate,
-        status: "confirmed",
-        reverses_id: null,
-        void_reason: null,
-        idempotency_key: input.initialPayment.idempotencyKey,
-        created_by: input.actorUserId,
-        created_at: timestamp,
-        row_version: 1,
-      }, { session });
-      await recordAudit({
-        workshopId: input.workshopId,
-        actorUserId: input.actorUserId,
-        action: "payment.record",
-        entityKind: "financial_movement",
-        entityId: movementId,
-        after: {
-          orderId,
-          amount: input.initialPayment.amount.amount,
-          currency: input.currency,
-          method: input.initialPayment.method,
-        },
-      }, session);
-    }
-
-    return { orderId, reference };
-  });
-}
-
-async function nextOrderReferenceInSession(workshopId: string, session: ClientSession): Promise<string> {
-  const orders = await collection("orders");
-  const total = await orders.countDocuments({ workshop_id: workshopId }, { session });
-  return `CMD-${String(total + 1).padStart(4, "0")}`;
-}
-
-function serialiseItemMeasurements(snapshot: {
-  wearerName?: string | null;
-  wearerRelation?: string | null;
-  values?: Record<string, string>;
-  notes?: string | null;
-  capturedAt: string;
-}): string | null {
-  const values = Object.fromEntries(
-    Object.entries(snapshot.values ?? {}).filter(([key, value]) => key.trim() && value.trim()),
-  );
-  const wearerName = snapshot.wearerName?.trim() || null;
-  const wearerRelation = snapshot.wearerRelation?.trim() || null;
-  const notes = snapshot.notes?.trim() || null;
-  if (!wearerName && !wearerRelation && Object.keys(values).length === 0 && !notes) return null;
-
-  return JSON.stringify({
-    source: "order_item",
-    wearer_name: wearerName,
-    wearer_relation: wearerRelation,
-    values,
-    notes,
-    captured_at: snapshot.capturedAt,
-  });
-}
+function serialiseItemMeasurements(snapshot:{wearerName?:string|null;wearerRelation?:string|null;values?:Record<string,string>;notes?:string|null;capturedAt:string}):string{const values=Object.fromEntries(Object.entries(snapshot.values??{}).filter(([k,v])=>k.trim()&&v.trim()));const wearerName=snapshot.wearerName?.trim()||null,wearerRelation=snapshot.wearerRelation?.trim()||null,notes=snapshot.notes?.trim()||null;if(!wearerName&&!wearerRelation&&!Object.keys(values).length&&!notes)return"{}";return JSON.stringify({source:"order_item",wearer_name:wearerName,wearer_relation:wearerRelation,values,notes,captured_at:snapshot.capturedAt});}

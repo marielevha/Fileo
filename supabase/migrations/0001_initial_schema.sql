@@ -12,6 +12,7 @@ create extension if not exists pgcrypto;
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = pg_catalog
 as $$
 begin
   new.updated_at = now();
@@ -407,6 +408,7 @@ create table public.attachments (
   client_id uuid references public.clients(id) on delete cascade,
   order_id uuid references public.orders(id) on delete cascade,
   order_item_id uuid references public.order_items(id) on delete cascade,
+  measurement_record_id uuid references public.measurement_records(id) on delete cascade,
   financial_movement_id uuid references public.financial_movements(id) on delete cascade,
   platform_payment_id uuid references public.platform_payments(id) on delete cascade,
   kind public.attachment_kind not null default 'other',
@@ -420,13 +422,15 @@ create table public.attachments (
   created_at timestamptz not null default now(),
   deleted_at timestamptz,
   constraint attachments_has_parent check (
-    num_nonnulls(client_id, order_id, order_item_id, financial_movement_id, platform_payment_id) >= 1
+    num_nonnulls(client_id, order_id, order_item_id, measurement_record_id, financial_movement_id, platform_payment_id) >= 1
   ),
   constraint attachments_size_positive check (size_bytes is null or size_bytes >= 0)
 );
 
 create index attachments_workshop_idx on public.attachments (workshop_id, created_at desc);
 create index attachments_order_idx on public.attachments (order_id, order_item_id, created_at desc);
+create index attachments_measurement_record_idx on public.attachments (measurement_record_id, created_at desc)
+  where measurement_record_id is not null and deleted_at is null;
 
 create table public.contents (
   id uuid primary key default gen_random_uuid(),
@@ -434,13 +438,28 @@ create table public.contents (
   slug text not null,
   locale text not null default 'fr',
   title text not null,
+  summary text,
+  body text,
+  task_key text,
+  duration_seconds integer,
+  transcript text,
+  video_url text,
+  sort_order integer not null default 0,
+  status text not null default 'draft',
+  created_by uuid references public.app_users(id) on delete set null,
   body_json jsonb not null default '{}'::jsonb,
   published_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   row_version integer not null default 1,
-  constraint contents_unique unique (kind, slug, locale)
+  constraint contents_unique unique (kind, slug, locale),
+  constraint contents_duration_nonnegative check (duration_seconds is null or duration_seconds >= 0),
+  constraint contents_status_valid check (status in ('draft', 'published', 'archived'))
 );
+
+create index contents_published_idx
+on public.contents (kind, locale, status, sort_order, published_at desc)
+where status = 'published';
 
 create trigger trg_contents_updated_at
 before update on public.contents
@@ -535,6 +554,10 @@ alter table public.subscription_periods enable row level security;
 alter table public.platform_payments enable row level security;
 alter table public.attachments enable row level security;
 alter table public.audit_log enable row level security;
+alter table public.contents enable row level security;
+alter table public.app_users enable row level security;
+alter table public.plans enable row level security;
+alter table public.tickets enable row level security;
 
 create policy workshops_member_select
 on public.workshops for select

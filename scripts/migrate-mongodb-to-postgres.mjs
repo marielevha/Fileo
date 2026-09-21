@@ -554,7 +554,16 @@ function mapContent(row) {
     slug: requiredText(row.slug, "Slug contenu manquant"),
     locale: requiredText(row.locale ?? "fr", "Locale contenu manquante"),
     title: requiredText(row.title, "Titre contenu manquant"),
-    body_json: json(row.body_json, {}),
+    summary: nullableText(row.summary),
+    body: nullableText(row.body),
+    task_key: nullableText(row.task_key),
+    duration_seconds: nullableInt(row.duration_seconds),
+    transcript: nullableText(row.transcript),
+    video_url: nullableText(row.video_url),
+    sort_order: int(row.sort_order, 0),
+    status: mapContentStatus(row.status),
+    created_by: nullableUserUuid(row.created_by),
+    body_json: json({ ...row.body_json, source_kind: row.kind }, {}),
     published_at: nullableTimestamp(row.published_at),
     created_at: timestamp(row.created_at),
     updated_at: timestamp(row.updated_at),
@@ -681,8 +690,14 @@ function mapPlatformPaymentStatus(value) {
 }
 
 function mapContentKind(value) {
+  if (value === "tutorial") return "guide";
   if (["faq", "guide"].includes(value)) return value;
   return "page";
+}
+
+function mapContentStatus(value) {
+  if (["draft", "published", "archived"].includes(value)) return value;
+  return "draft";
 }
 
 function mapTicketStatus(value) {

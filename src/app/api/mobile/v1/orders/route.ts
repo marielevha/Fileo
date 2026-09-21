@@ -6,6 +6,7 @@ import {
   OrderWriteError,
   type CreateOrderItemInput,
   type InitialPaymentMethod,
+  type OrderFilter,
   type OrderItemWorkType,
 } from "@/lib/repos/orders";
 import { isCurrencyCode, money } from "@/lib/money";
@@ -21,6 +22,7 @@ import {
   parseJsonBody,
   requireMobileSession,
   requiredString,
+  stringParam,
 } from "@/lib/mobile/api";
 import { isCountryCode, parsePhone } from "@/lib/phone";
 
@@ -32,6 +34,7 @@ type CreateOrderBody = {
   promisedDate?: string | null;
   fittingDate?: string | null;
   instructions?: string | null;
+  orderTotalAmount?: number;
   discountAmount?: number;
   discountReason?: string | null;
   items?: Array<{
@@ -62,8 +65,12 @@ export async function GET(request: Request) {
   return mobileHandler(async () => {
     const session = await requireMobileSession(request, "orders.read");
     const url = new URL(request.url);
+    const rawFilter = stringParam(url, "filter", "all");
+    const filters: OrderFilter[] = ["all", "late", "nouvelle", "en_cours", "prete", "partiellement_remise", "remise", "annulee"];
     const page = await listOrdersPage(session.workshop.id, {
       includeMoney: session.workshop.canViewMoney,
+      search: stringParam(url, "q"),
+      filter: filters.includes(rawFilter as OrderFilter) ? rawFilter as OrderFilter : "all",
       page: intParam(url, "page", 1, 1, 10_000),
       pageSize: intParam(url, "pageSize", 20, 1, 50),
     });
@@ -80,6 +87,14 @@ export async function POST(request: Request) {
     const body = await parseJsonBody<CreateOrderBody>(request);
     const clientId = await resolveClientId(body, session);
     const items = parseItems(body, session.workshop.currency, session.workshop.canViewMoney);
+
+    if (session.workshop.canViewMoney) {
+      const orderTotal = integerAmount(body.orderTotalAmount ?? 0, "Total commande");
+      const itemTotal = items.reduce((total, item) => total + item.unitPrice.amount * item.quantity, 0);
+      if (itemTotal === 0 && orderTotal > 0) {
+        items[0] = { ...items[0], unitPrice: money(orderTotal, session.workshop.currency) };
+      }
+    }
 
     let initialPayment: Parameters<typeof createOrder>[0]["initialPayment"] = null;
     if (body.initialPayment && session.workshop.canViewMoney) {

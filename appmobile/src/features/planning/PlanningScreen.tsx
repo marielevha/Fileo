@@ -1,56 +1,98 @@
-import { StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock3, Search, UserRound, UsersRound, X } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Card } from '@/src/components/Card';
-import { ListRow } from '@/src/components/ListRow';
-import { Screen } from '@/src/components/Screen';
-import { Text } from '@/src/components/Text';
-import { colors } from '@/src/theme/colors';
+import { getPlanning, updatePlanningItem } from '../../api/client';
+import { AppText } from '../../components/AppText';
+import { DateField } from '../../components/DateField';
+import { palette, useAppTheme } from '../../theme';
+import type { ItemStatus } from '../../types/orders';
+import type { PlanningAssigneeFilter, PlanningItem, PlanningMember, PlanningResponse, PlanningStatusFilter } from '../../types/planning';
+import { formatDate, itemStatuses, itemStatusLabels, itemTone, todayKey } from '../orders/orderUi';
 
-const planning = [
-  { title: 'Lun. 14 sept.', subtitle: '2 echeances, 1 essayage', meta: '3' },
-  { title: 'Mar. 15 sept.', subtitle: 'Chemise manches longues - Serge', meta: '1' },
-  { title: 'Mer. 16 sept.', subtitle: 'Aucun evenement critique', meta: '0' },
+type ViewMode = 'agenda' | 'week';
+type Horizon = 'all' | 'late' | 'today' | 'week' | 'none';
+type PlanningSection = { title: string; data: PlanningItem[] };
+
+const statusFilters: Array<{ value: PlanningStatusFilter; label: string }> = [
+  { value: 'active', label: 'Actives' }, { value: 'a_realiser', label: 'À réaliser' },
+  { value: 'en_cours', label: 'En cours' }, { value: 'a_essayer', label: 'À essayer' },
+  { value: 'pret', label: 'Prêtes' }, { value: 'remis', label: 'Remises' },
+  { value: 'annule', label: 'Annulées' }, { value: 'all', label: 'Toutes' },
+];
+
+const horizonFilters: Array<{ value: Horizon; label: string }> = [
+  { value: 'all', label: 'Toutes les dates' }, { value: 'week', label: '7 jours' },
+  { value: 'none', label: 'Sans date' },
 ];
 
 export function PlanningScreen() {
-  return (
-    <Screen>
-      <View style={styles.header}>
-        <Text variant="title">Planning</Text>
-        <View style={styles.pill}>
-          <Text style={styles.pillText}>Semaine</Text>
-        </View>
-      </View>
+  const theme = useAppTheme(); const router = useRouter();
+  const [response, setResponse] = useState<PlanningResponse | null>(null);
+  const [query, setQuery] = useState(''); const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [status, setStatus] = useState<PlanningStatusFilter>('active'); const [assignee, setAssignee] = useState<PlanningAssigneeFilter>('all');
+  const [view, setView] = useState<ViewMode>('agenda'); const [horizon, setHorizon] = useState<Horizon>('all');
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date())); const [selectedDate, setSelectedDate] = useState(todayKey());
+  const [editingId, setEditingId] = useState<string | null>(null); const [loading, setLoading] = useState(true); const [refreshing, setRefreshing] = useState(false); const [error, setError] = useState<string | null>(null);
 
-      <Card style={styles.card}>
-        <Text variant="subtitle">Vue rapide</Text>
-        {planning.map((item) => (
-          <ListRow key={item.title} {...item} />
-        ))}
-      </Card>
-    </Screen>
-  );
+  useEffect(()=>{const timeout=setTimeout(()=>setDebouncedQuery(query),350);return()=>clearTimeout(timeout);},[query]);
+  const load=useCallback(async(refresh=false)=>{refresh?setRefreshing(true):setLoading(true);setError(null);try{setResponse(await getPlanning({q:debouncedQuery,status:'all',assignee}));}catch(caught){setError(caught instanceof Error?caught.message:'Impossible de charger le planning.');}finally{setLoading(false);setRefreshing(false);}},[assignee,debouncedQuery]);
+  useFocusEffect(useCallback(()=>{void load();},[load]));
+
+  const activeItems=useMemo(()=>filterByStatus(response?.items??[],status),[response,status]);
+  const visibleItems=useMemo(()=>filterByDate(activeItems,view,horizon,selectedDate),[activeItems,horizon,selectedDate,view]);
+  const sections=useMemo(()=>buildSections(visibleItems,view,selectedDate),[selectedDate,view,visibleItems]);
+  const stats=useMemo(()=>planningStats(response?.items??[]),[response]);
+  const weekDays=useMemo(()=>Array.from({length:7},(_,index)=>addDays(weekStart,index)),[weekStart]);
+
+  function chooseWeek(offset:number){const next=addDays(weekStart,offset*7);setWeekStart(next);setSelectedDate(dateKey(next));}
+
+  return <SafeAreaView edges={['top']} style={[styles.safeArea,{backgroundColor:theme.colors.background}]}>
+    <SectionList
+      sections={sections}
+      keyExtractor={(item)=>item.item_id}
+      renderItem={({item})=><TaskCard key={`${item.item_id}:${item.row_version}`} editing={editingId===item.item_id} item={item} members={response?.members??[]} onEdit={()=>setEditingId((current)=>current===item.item_id?null:item.item_id)} onOpenOrder={()=>router.push({pathname:'/atelier/commandes/[id]',params:{id:item.order_id}})} onUpdated={()=>{setEditingId(null);void load(true);}}/>}
+      renderSectionHeader={({section})=><View style={[styles.groupHeader,{backgroundColor:theme.colors.background}]}><AppText variant="title3">{section.title}</AppText><AppText color={theme.colors.textMuted} variant="caption">{section.data.length}</AppText></View>}
+      contentContainerStyle={styles.content}
+      stickySectionHeadersEnabled={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={()=>void load(true)} tintColor={theme.colors.primary}/>}
+      ListHeaderComponent={<View>
+        <View style={styles.header}><View><AppText color={theme.colors.textMuted} variant="caption">Organisation de la production</AppText><AppText variant="title1">Planning</AppText></View><View style={[styles.dateBadge,{backgroundColor:theme.colors.primarySoft}]}><CalendarDays color={theme.colors.primary} size={20}/><AppText color={theme.colors.primary} variant="caption">{shortToday()}</AppText></View></View>
+        <View style={[styles.search,{backgroundColor:theme.colors.surface,borderColor:theme.colors.border}]}><Search color={theme.colors.textSubtle} size={19}/><TextInput onChangeText={setQuery} placeholder="Client, commande ou article" placeholderTextColor={theme.colors.textSubtle} selectionColor={theme.colors.primary} style={[styles.searchInput,{color:theme.colors.text}]} value={query}/>{loading&&response?<ActivityIndicator color={theme.colors.primary} size="small"/>:null}</View>
+        <Segmented options={[['agenda','Agenda'],['week','Semaine']]} value={view} onChange={(value)=>setView(value as ViewMode)}/>
+        <ScrollView contentContainerStyle={styles.shortcuts} horizontal showsHorizontalScrollIndicator={false}><SummaryShortcut color={palette.pink500} label="En retard" onPress={()=>{setView('agenda');setHorizon('late');setStatus('active');}} selected={view==='agenda'&&horizon==='late'} value={stats.late}/><SummaryShortcut color={palette.violet700} label="Aujourd'hui" onPress={()=>{setView('agenda');setHorizon('today');setStatus('active');}} selected={view==='agenda'&&horizon==='today'} value={stats.today}/><SummaryShortcut color={palette.amber500} label="Non affectées" onPress={()=>setAssignee(assignee==='unassigned'?'all':'unassigned')} selected={assignee==='unassigned'} value={stats.unassigned}/></ScrollView>
+        <ScrollView contentContainerStyle={styles.chips} horizontal showsHorizontalScrollIndicator={false}>{statusFilters.map((option)=><FilterChip key={option.value} label={option.label} onPress={()=>setStatus(option.value)} selected={status===option.value}/>)}</ScrollView>
+        <View style={styles.filterLabel}><UsersRound color={theme.colors.textSubtle} size={17}/><AppText color={theme.colors.textMuted} variant="caption">Collaborateur</AppText></View>
+        <ScrollView contentContainerStyle={styles.chips} horizontal showsHorizontalScrollIndicator={false}><FilterChip label="Toute l'équipe" onPress={()=>setAssignee('all')} selected={assignee==='all'}/><FilterChip label="Non affectées" onPress={()=>setAssignee('unassigned')} selected={assignee==='unassigned'}/>{response?.members.map((member)=><FilterChip key={member.id} label={member.full_name} onPress={()=>setAssignee(member.id)} selected={assignee===member.id}/>)}</ScrollView>
+        {view==='agenda'?<ScrollView contentContainerStyle={styles.horizons} horizontal showsHorizontalScrollIndicator={false}>{horizonFilters.map((option)=><FilterChip key={option.value} label={option.label} onPress={()=>setHorizon(option.value)} selected={horizon===option.value}/>)}</ScrollView>:<WeekPicker days={weekDays} onMove={chooseWeek} onSelect={(date)=>setSelectedDate(dateKey(date))} selected={selectedDate}/>}
+        {error?<Pressable onPress={()=>void load()} style={[styles.error,{backgroundColor:theme.colors.secondarySoft,borderColor:theme.colors.secondary}]}><AppText color={theme.colors.secondary} variant="caption">{error} · Réessayer</AppText></Pressable>:null}
+      </View>}
+      ListEmptyComponent={!loading?<View style={styles.empty}><Clock3 color={theme.colors.textSubtle} size={34}/><AppText style={styles.emptyTitle} variant="title3">Planning dégagé</AppText><AppText color={theme.colors.textMuted} style={styles.emptyCopy}>Aucune tâche ne correspond aux filtres sélectionnés.</AppText></View>:<ActivityIndicator color={theme.colors.primary} size="large" style={styles.loader}/>}
+      ListFooterComponent={<View style={styles.footer}><AppText color={theme.colors.textSubtle} variant="caption">{visibleItems.length} tâche{visibleItems.length>1?'s':''} affichée{visibleItems.length>1?'s':''}</AppText></View>}
+    />
+  </SafeAreaView>;
 }
 
-const styles = StyleSheet.create({
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  pill: {
-    backgroundColor: colors.panelRaised,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  pillText: {
-    color: colors.textStrong,
-    fontWeight: '800',
-  },
-  card: {
-    gap: 4,
-  },
-});
+function TaskCard({editing,item,members,onEdit,onOpenOrder,onUpdated}:{editing:boolean;item:PlanningItem;members:PlanningMember[];onEdit:()=>void;onOpenOrder:()=>void;onUpdated:()=>void}){const theme=useAppTheme();const [status,setStatus]=useState<ItemStatus>(item.status);const [dueDate,setDueDate]=useState(item.explicit_due_date??item.effective_due_date??'');const [assigneeId,setAssigneeId]=useState<string|null>(item.assignee_user_id);const [reason,setReason]=useState('');const [busy,setBusy]=useState(false);const [error,setError]=useState<string|null>(null);const tone=itemTone(item.status),late=isLate(item),today=item.effective_due_date===todayKey();async function save(){setBusy(true);setError(null);try{await updatePlanningItem(item.item_id,{status,dueDate:dueDate||null,assigneeId,reason,rowVersion:item.row_version});onUpdated();}catch(caught){setError(caught instanceof Error?caught.message:'Modification impossible.');}finally{setBusy(false);}}return <View style={[styles.task,{backgroundColor:theme.colors.surface,borderColor:late?theme.colors.secondary:theme.colors.border}]}><Pressable onPress={onEdit} style={styles.taskSummary}><View style={[styles.timelineMark,{backgroundColor:late?theme.colors.secondary:today?theme.colors.warning:theme.colors.primary}]}/><View style={styles.taskCopy}><View style={styles.taskTitleRow}><AppText numberOfLines={1} style={styles.taskTitle} variant="bodyMedium">{item.category}</AppText><View style={[styles.status,{backgroundColor:tone.background}]}><AppText color={tone.foreground} numberOfLines={1} variant="caption">{itemStatusLabels[item.status]}</AppText></View></View><AppText color={theme.colors.textMuted} numberOfLines={1} variant="caption">{item.client_name} · {item.reference}</AppText><AppText color={theme.colors.textSubtle} numberOfLines={2} style={styles.taskDescription} variant="caption">{item.description}</AppText><View style={styles.meta}><CalendarDays color={late?theme.colors.secondary:theme.colors.textSubtle} size={15}/><AppText color={late?theme.colors.secondary:theme.colors.textMuted} variant="caption">{late?'En retard · ':''}{formatDate(item.effective_due_date,'Sans date')}</AppText><UserRound color={theme.colors.textSubtle} size={15}/><AppText color={theme.colors.textMuted} numberOfLines={1} style={styles.assigneeMeta} variant="caption">{item.assignee_name??'Non affectée'}</AppText></View></View></Pressable>{editing?<View style={[styles.editor,{borderTopColor:theme.colors.border}]}><View style={styles.editorTop}><AppText variant="label">Mettre à jour la tâche</AppText><Pressable accessibilityLabel="Fermer" onPress={onEdit}><X color={theme.colors.textMuted} size={20}/></Pressable></View><Label text="Statut"/><ScrollView contentContainerStyle={styles.statusOptions} horizontal showsHorizontalScrollIndicator={false}>{itemStatuses.map((value)=><FilterChip key={value} label={itemStatusLabels[value]} onPress={()=>setStatus(value)} selected={status===value}/>)}</ScrollView><Label text="Échéance"/><Field onChangeText={setDueDate} type="date" value={dueDate}/><Label text="Affectation"/><ScrollView contentContainerStyle={styles.statusOptions} horizontal showsHorizontalScrollIndicator={false}><FilterChip label="Non affectée" onPress={()=>setAssigneeId(null)} selected={!assigneeId}/>{members.map((member)=><FilterChip key={member.id} label={member.full_name} onPress={()=>setAssigneeId(member.id)} selected={assigneeId===member.id}/>)}</ScrollView><Label text="Motif"/><Field onChangeText={setReason} placeholder="Obligatoire pour une date, un recul ou une annulation" value={reason}/>{error?<View style={[styles.inlineError,{backgroundColor:theme.colors.secondarySoft}]}><AppText color={theme.colors.secondary} variant="caption">{error}</AppText></View>:null}<View style={styles.editorActions}><Pressable onPress={onOpenOrder} style={[styles.orderButton,{borderColor:theme.colors.border}]}><ClipboardList color={theme.colors.textMuted} size={18}/><AppText variant="label">Commande</AppText></Pressable><Pressable disabled={busy} onPress={save} style={styles.saveButton}>{busy?<ActivityIndicator color={palette.white}/>:<><Check color={palette.white} size={18}/><AppText color={palette.white} variant="label">Enregistrer</AppText></>}</Pressable></View></View>:null}</View>;}
+function SummaryShortcut({color,label,onPress,selected,value}:{color:string;label:string;onPress:()=>void;selected:boolean;value:number}){const theme=useAppTheme();return <Pressable onPress={onPress} style={({pressed})=>[styles.shortcut,{backgroundColor:selected?theme.colors.primarySoft:theme.colors.surface,borderColor:selected?theme.colors.primary:theme.colors.border},pressed&&styles.pressed]}><View style={[styles.shortcutDot,{backgroundColor:color}]}/><AppText color={selected?theme.colors.primary:theme.colors.textMuted} numberOfLines={1} variant="caption">{label}</AppText><AppText color={selected?theme.colors.primary:theme.colors.text} variant="label">{value}</AppText></Pressable>;}
+function FilterChip({label,onPress,selected}:{label:string;onPress:()=>void;selected:boolean}){const theme=useAppTheme();return <Pressable onPress={onPress} style={[styles.chip,{backgroundColor:selected?theme.colors.primarySoft:theme.colors.surface,borderColor:selected?theme.colors.primary:theme.colors.border}]}><AppText color={selected?theme.colors.primary:theme.colors.textMuted} numberOfLines={1} variant="caption">{label}</AppText></Pressable>;}
+function Segmented({options,value,onChange}:{options:Array<[string,string]>;value:string;onChange:(value:string)=>void}){const theme=useAppTheme();return <View style={[styles.segmented,{backgroundColor:theme.colors.surfaceMuted}]}>{options.map(([key,label])=><Pressable key={key} onPress={()=>onChange(key)} style={[styles.segment,key===value&&{backgroundColor:theme.colors.surface}]}><AppText color={key===value?theme.colors.primary:theme.colors.textMuted} variant="label">{label}</AppText></Pressable>)}</View>;}
+function WeekPicker({days,onMove,onSelect,selected}:{days:Date[];onMove:(offset:number)=>void;onSelect:(date:Date)=>void;selected:string}){const theme=useAppTheme();return <View style={[styles.week,{backgroundColor:theme.colors.surface,borderColor:theme.colors.border}]}><View style={styles.weekHeader}><Pressable accessibilityLabel="Semaine précédente" onPress={()=>onMove(-1)} style={styles.weekArrow}><ChevronLeft color={theme.colors.text} size={20}/></Pressable><AppText variant="label">{weekLabel(days[0],days[6])}</AppText><Pressable accessibilityLabel="Semaine suivante" onPress={()=>onMove(1)} style={styles.weekArrow}><ChevronRight color={theme.colors.text} size={20}/></Pressable></View><View style={styles.days}>{days.map((day)=>{const key=dateKey(day),active=key===selected;return <Pressable key={key} onPress={()=>onSelect(day)} style={[styles.day,active&&{backgroundColor:theme.colors.primary}]}><AppText color={active?palette.white:theme.colors.textMuted} variant="caption">{day.toLocaleDateString('fr-FR',{weekday:'short'}).replace('.','')}</AppText><AppText color={active?palette.white:theme.colors.text} variant="label">{day.getDate()}</AppText></Pressable>;})}</View></View>;}
+function Label({text}:{text:string}){const theme=useAppTheme();return <AppText color={theme.colors.textMuted} variant="caption">{text}</AppText>;}
+function Field({type='text',...props}:React.ComponentProps<typeof TextInput>&{type?:'text'|'date'}){const theme=useAppTheme();if(type==='date'&&typeof props.value==='string'&&props.onChangeText)return <DateField onChange={props.onChangeText} value={props.value}/>;return <TextInput {...props} placeholderTextColor={theme.colors.textSubtle} selectionColor={theme.colors.primary} style={[styles.field,{backgroundColor:theme.colors.surfaceMuted,borderColor:theme.colors.border,color:theme.colors.text}]}/>;}
+
+function filterByStatus(items:PlanningItem[],status:PlanningStatusFilter){if(status==='all')return items;if(status==='active')return items.filter((item)=>item.status!=='remis'&&item.status!=='annule');return items.filter((item)=>item.status===status);}
+function filterByDate(items:PlanningItem[],view:ViewMode,horizon:Horizon,selected:string){const today=todayKey(),weekEnd=dateKey(addDays(new Date(`${today}T12:00:00`),7));if(view==='week')return items.filter((item)=>item.effective_due_date===selected);if(horizon==='late')return items.filter((item)=>isLate(item));if(horizon==='today')return items.filter((item)=>item.effective_due_date===today);if(horizon==='week')return items.filter((item)=>Boolean(item.effective_due_date&&item.effective_due_date>=today&&item.effective_due_date<=weekEnd));if(horizon==='none')return items.filter((item)=>!item.effective_due_date);return items;}
+function buildSections(items:PlanningItem[],view:ViewMode,selected:string):PlanningSection[]{if(view==='week')return items.length?[{title:longDate(selected),data:items}]:[];const today=todayKey(),tomorrow=dateKey(addDays(new Date(`${today}T12:00:00`),1));const groups:[string,(item:PlanningItem)=>boolean][]=[["En retard",(item)=>isLate(item)],["Aujourd'hui",(item)=>item.effective_due_date===today],["Demain",(item)=>item.effective_due_date===tomorrow],["À venir",(item)=>Boolean(item.effective_due_date&&item.effective_due_date>tomorrow)],["Sans échéance",(item)=>!item.effective_due_date]];return groups.map(([title,match])=>({title,data:items.filter(match)})).filter((section)=>section.data.length);}
+function planningStats(items:PlanningItem[]){const active=items.filter((item)=>item.status!=='remis'&&item.status!=='annule'),today=todayKey();return{late:active.filter(isLate).length,today:active.filter((item)=>item.effective_due_date===today).length,unassigned:active.filter((item)=>!item.assignee_user_id).length};}
+function isLate(item:PlanningItem){return Boolean(item.effective_due_date&&item.effective_due_date<todayKey()&&item.status!=='remis'&&item.status!=='annule');}
+function startOfWeek(date:Date){const copy=new Date(date),day=(copy.getDay()+6)%7;copy.setHours(12,0,0,0);copy.setDate(copy.getDate()-day);return copy;}
+function addDays(date:Date,days:number){const copy=new Date(date);copy.setDate(copy.getDate()+days);return copy;}
+function dateKey(date:Date){return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function longDate(value:string){const text=new Date(`${value}T12:00:00`).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});return text.charAt(0).toUpperCase()+text.slice(1);}
+function shortToday(){return new Date().toLocaleDateString('fr-FR',{day:'numeric',month:'short'});}
+function weekLabel(start:Date,end:Date){return `${start.toLocaleDateString('fr-FR',{day:'numeric',month:'short'})} – ${end.toLocaleDateString('fr-FR',{day:'numeric',month:'short'})}`;}
+
+const styles=StyleSheet.create({safeArea:{flex:1},content:{flexGrow:1,gap:10,padding:18,paddingBottom:28},header:{alignItems:'center',flexDirection:'row',justifyContent:'space-between',paddingBottom:16},dateBadge:{alignItems:'center',borderRadius:8,flexDirection:'row',gap:7,minHeight:42,paddingHorizontal:11},search:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',paddingHorizontal:13},searchInput:{flex:1,fontFamily:'Inter_400Regular',fontSize:14,height:48,marginLeft:9,paddingVertical:0},segmented:{borderRadius:8,flexDirection:'row',marginTop:12,padding:4},segment:{alignItems:'center',borderRadius:6,flex:1,justifyContent:'center',minHeight:40},shortcuts:{gap:8,paddingTop:11},shortcut:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:7,minHeight:38,paddingHorizontal:11},shortcutDot:{borderRadius:999,height:7,width:7},chips:{gap:7,paddingVertical:11},horizons:{gap:7,paddingBottom:14},chip:{borderRadius:999,borderWidth:1,justifyContent:'center',minHeight:34,paddingHorizontal:12},filterLabel:{alignItems:'center',flexDirection:'row',gap:6,marginTop:2},week:{borderRadius:8,borderWidth:1,marginBottom:14,marginTop:4,padding:10},weekHeader:{alignItems:'center',flexDirection:'row',justifyContent:'space-between'},weekArrow:{alignItems:'center',height:36,justifyContent:'center',width:38},days:{flexDirection:'row',gap:3,justifyContent:'space-between',marginTop:8},day:{alignItems:'center',borderRadius:8,flex:1,gap:2,justifyContent:'center',minHeight:54,minWidth:0},error:{borderRadius:8,borderWidth:1,marginBottom:10,padding:12},groupHeader:{alignItems:'center',flexDirection:'row',justifyContent:'space-between',paddingBottom:3,paddingTop:13},task:{borderRadius:8,borderWidth:1,overflow:'hidden'},taskSummary:{flexDirection:'row',minHeight:126,padding:13},timelineMark:{borderRadius:999,width:4},taskCopy:{flex:1,marginLeft:11,minWidth:0},taskTitleRow:{alignItems:'flex-start',flexDirection:'row'},taskTitle:{flex:1,minWidth:0},status:{borderRadius:999,marginLeft:8,maxWidth:100,paddingHorizontal:8,paddingVertical:4},taskDescription:{marginTop:7},meta:{alignItems:'center',flexDirection:'row',gap:5,marginTop:10},assigneeMeta:{flex:1,marginLeft:5,minWidth:0},editor:{borderTopWidth:1,gap:9,padding:13},editorTop:{alignItems:'center',flexDirection:'row',justifyContent:'space-between'},statusOptions:{gap:7},field:{borderRadius:8,borderWidth:1,fontFamily:'Inter_400Regular',fontSize:15,height:50,paddingHorizontal:13,paddingVertical:0},inlineError:{borderRadius:8,padding:10},editorActions:{alignItems:'center',flexDirection:'row',justifyContent:'space-between'},orderButton:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:7,minHeight:44,paddingHorizontal:13},saveButton:{alignItems:'center',backgroundColor:palette.violet700,borderRadius:8,flexDirection:'row',gap:7,justifyContent:'center',minHeight:44,paddingHorizontal:16},pressed:{opacity:.72},empty:{alignItems:'center',justifyContent:'center',minHeight:230,padding:30},emptyTitle:{marginTop:13},emptyCopy:{marginTop:6,textAlign:'center'},loader:{marginTop:70},footer:{alignItems:'center',paddingVertical:18}});

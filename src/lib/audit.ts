@@ -1,7 +1,7 @@
 import "server-only";
 
-import type { ClientSession } from "mongodb";
-import { collection, newId, nowIso } from "./db";
+import { randomUUID } from "node:crypto";
+import { sql, type PgExecutor } from "@/lib/supabase/postgres";
 
 /**
  * Audit trail — §17.1.
@@ -15,6 +15,7 @@ export type AuditAction =
   | "auth.login"
   | "auth.logout"
   | "auth.register"
+  | "user.update"
   | "workshop.create"
   | "workshop.update"
   | "workshop.suspend"
@@ -29,6 +30,7 @@ export type AuditAction =
   | "order.create"
   | "order.update"
   | "order.cancel"
+  | "order.close"
   | "order.date_change"
   | "order.price_change"
   | "item.status_change"
@@ -62,20 +64,15 @@ export type AuditEntry = {
 
 export async function recordAudit(
   entry: AuditEntry,
-  session?: ClientSession,
+  executor?: PgExecutor,
 ): Promise<void> {
-  const audit = await collection("audit_log");
-  await audit.insertOne({
-    id: newId(),
-    workshop_id: entry.workshopId ?? null,
-    actor_user_id: entry.actorUserId ?? null,
-    action: entry.action,
-    entity_kind: entry.entityKind,
-    entity_id: entry.entityId ?? null,
-    reason: entry.reason ?? null,
-    before_json: entry.before === undefined ? null : JSON.stringify(entry.before),
-    after_json: entry.after === undefined ? null : JSON.stringify(entry.after),
-    ip_address: entry.ipAddress ?? null,
-    created_at: nowIso(),
-  }, { session });
+  await sql(`insert into public.audit_log
+    (id, workshop_id, actor_user_id, action, entity_kind, entity_id, reason, before_json, after_json, ip_address)
+    values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::inet)`, [
+    randomUUID(), entry.workshopId ?? null, entry.actorUserId ?? null, entry.action,
+    entry.entityKind, entry.entityId ?? null, entry.reason ?? null,
+    entry.before === undefined ? null : JSON.stringify(entry.before),
+    entry.after === undefined ? null : JSON.stringify(entry.after),
+    entry.ipAddress ?? null,
+  ], executor);
 }

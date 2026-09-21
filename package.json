@@ -19,10 +19,16 @@
     "check:subscriptions": "node scripts/check-subscriptions.mjs",
     "check:momo:sandbox": "node scripts/check-momo-sandbox.mjs",
     "check:mobile-api": "node scripts/check-mobile-api.mjs",
+    "check:mobile-orders": "node scripts/check-mobile-orders.mjs",
+    "check:mobile-order-close": "node scripts/check-mobile-order-close.mjs",
+    "check:mobile-planning": "node scripts/check-mobile-planning.mjs",
+    "check:mobile-clients": "node scripts/check-mobile-clients.mjs",
+    "check:supabase-runtime": "node scripts/check-supabase-runtime.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node scripts/seed.mjs",
     "db:migrate:sqlite": "node scripts/migrate-sqlite-to-mongodb.mjs",
-    "db:migrate:mongo-to-postgres": "node scripts/migrate-mongodb-to-postgres.mjs"
+    "db:migrate:mongo-to-postgres": "node scripts/migrate-mongodb-to-postgres.mjs",
+    "db:repair:supabase-contents": "node scripts/backfill-supabase-contents.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
@@ -38,6 +44,7 @@
     "@tailwindcss/postcss": "^4.0.0",
     "@tailwindcss/typography": "^0.5.16",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "daisyui": "^5.0.0",

@@ -1,205 +1,28 @@
 import "server-only";
-
-import type { ClientSession } from "mongodb";
-import { recordAudit } from "@/lib/audit";
-import { collection, newId, nowIso, withTransaction } from "@/lib/db";
-import { money, type CurrencyCode, type Money } from "@/lib/money";
-
-export type AdminCounts = { workshops: number; activeWorkshops: number; trials: number; payingWorkshops: number; expiringSoon: number; openTickets: number; pendingPayments: number };
-export async function getAdminCounts(): Promise<AdminCounts> {
-  const db = {
-    workshops: await collection("workshops"), subscriptions: await collection("subscriptions"),
-    tickets: await collection("tickets"), payments: await collection("platform_payments"),
-  };
-  const today = new Date().toISOString().slice(0, 10);
-  const soon = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
-  const [workshops, activeWorkshops, trials, payingWorkshops, expiringSoon, openTickets, pendingPayments] = await Promise.all([
-    db.workshops.countDocuments(), db.workshops.countDocuments({ status: "active" }),
-    db.subscriptions.countDocuments({ status: "trial" }), db.subscriptions.countDocuments({ status: "active" }),
-    db.subscriptions.countDocuments({ status: { $in: ["trial", "active", "renewal_due"] }, current_period_end: { $gte: today, $lte: soon } }),
-    db.tickets.countDocuments({ status: { $ne: "resolved" } }), db.payments.countDocuments({ status: "declared" }),
-  ]);
-  return { workshops, activeWorkshops, trials, payingWorkshops, expiringSoon, openTickets, pendingPayments };
-}
-
-export async function getRevenueByCurrency(): Promise<Money[]> {
-  const payments = await collection("platform_payments");
-  const rows = await payments.aggregate<{ currency: string; total: number }>([
-    { $match: { status: "validated" } },
-    { $group: { _id: "$currency", total: { $sum: "$amount" } } },
-    { $project: { _id: 0, currency: "$_id", total: 1 } }, { $sort: { currency: 1 } },
-  ]).toArray();
-  return rows.map((row) => money(row.total, row.currency as CurrencyCode));
-}
-
-export type WorkshopAdminRow = { id: string; name: string; country_code: string; city: string | null; currency: string; status: string; created_at: string; owner_name: string; member_count: number; subscription_status: string | null; current_period_end: string | null };
-export async function listWorkshops(search = ""): Promise<WorkshopAdminRow[]> {
-  const workshops = await collection("workshops");
-  const match = search.trim() ? { name: { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" } } : {};
-  return workshops.aggregate<WorkshopAdminRow>([
-    { $match: match }, { $sort: { created_at: -1 } }, { $limit: 200 },
-    { $lookup: { from: "users", localField: "owner_user_id", foreignField: "id", as: "owner" } },
-    { $lookup: { from: "memberships", let: { wid: "$id" }, pipeline: [{ $match: { $expr: { $and: [{ $eq: ["$workshop_id", "$$wid"] }, { $eq: ["$status", "active"] }] } } }], as: "members" } },
-    { $lookup: { from: "subscriptions", localField: "id", foreignField: "workshop_id", as: "subscription" } },
-    { $set: { owner_name: { $ifNull: [{ $first: "$owner.full_name" }, "—"] }, member_count: { $size: "$members" }, subscription_status: { $ifNull: [{ $first: "$subscription.status" }, null] }, current_period_end: { $ifNull: [{ $first: "$subscription.current_period_end" }, null] } } },
-    { $project: { _id: 0, owner: 0, members: 0, subscription: 0 } },
-  ]).toArray();
-}
-
-export type PlatformPaymentRow = {
-  id: string;
-  workshop_id: string;
-  workshop_name: string;
-  subscription_id: string;
-  plan_id: string | null;
-  plan_label: string | null;
-  plan_period_months: number | null;
-  subscription_current_period_end: string | null;
-  projected_period_start: string | null;
-  projected_period_end: string | null;
-  amount: number;
-  currency: string;
-  channel: string;
-  external_reference: string | null;
-  status: string;
-  declared_at: string;
-  review_note: string | null;
-};
-export async function listPlatformPayments(status?: string): Promise<PlatformPaymentRow[]> {
-  const payments = await collection("platform_payments");
-  const rows = await payments.aggregate<PlatformPaymentRow>([
-    { $match: status ? { status } : {} }, { $sort: { declared_at: -1 } }, { $limit: 200 },
-    { $lookup: { from: "workshops", localField: "workshop_id", foreignField: "id", as: "workshop" } },
-    { $lookup: { from: "subscriptions", localField: "subscription_id", foreignField: "id", as: "subscription" } },
-    { $set: { subscription_row: { $first: "$subscription" } } },
-    { $set: { effective_plan_id: { $ifNull: ["$plan_id", "$subscription_row.plan_id"] } } },
-    { $lookup: { from: "plans", localField: "effective_plan_id", foreignField: "id", as: "plan" } },
-    { $set: {
-      plan_row: { $first: "$plan" },
-      workshop_name: { $ifNull: [{ $first: "$workshop.name" }, "Atelier inconnu"] },
-      plan_id: "$effective_plan_id",
-      subscription_current_period_end: { $ifNull: ["$subscription_row.current_period_end", null] },
-    } },
-    { $set: {
-      plan_label: { $ifNull: ["$plan_row.label", null] },
-      plan_period_months: { $ifNull: ["$plan_row.period_months", null] },
-    } },
-    { $project: { _id: 0, workshop: 0, subscription: 0, subscription_row: 0, plan: 0, plan_row: 0, effective_plan_id: 0 } },
-  ]).toArray();
-  return Promise.all(rows.map(async (row) => {
-    if (!row.plan_period_months) return { ...row, projected_period_start: null, projected_period_end: null };
-    const base = await nextPaymentPeriodStart(row.workshop_id, row.subscription_current_period_end);
-    return {
-      ...row,
-      projected_period_start: base,
-      projected_period_end: addMonths(base, row.plan_period_months),
-    };
-  }));
-}
-
-export async function validatePlatformPayment(params: { paymentId: string; reviewerUserId: string; note?: string | null }): Promise<{ alreadyValidated: boolean; scheduledForLater?: boolean }> {
-  return withTransaction(async (session) => {
-    const payments = await collection("platform_payments"); const subscriptions = await collection("subscriptions"); const plans = await collection("plans");
-    const payment = await payments.findOne({ id: params.paymentId }, { session });
-    if (!payment) throw new Error("Règlement introuvable.");
-    if (payment.status === "validated") return { alreadyValidated: true };
-    const subscription = await subscriptions.findOne({ id: payment.subscription_id }, { session });
-    if (!subscription) throw new Error("Abonnement introuvable.");
-    const targetPlanId = payment.plan_id ?? subscription.plan_id;
-    const plan = await plans.findOne({ id: targetPlanId }, { projection: { period_months: 1 }, session });
-    const today = todayIso();
-    const periodStart = await nextPaymentPeriodStart(String(payment.workshop_id), subscription.current_period_end ?? null, session);
-    const periodEnd = addMonths(periodStart, Number(plan?.period_months ?? 1));
-    const currentStillActive = typeof subscription.current_period_end === "string" && subscription.current_period_end > today;
-    const shouldUpdateCurrentSubscription = !currentStillActive || subscription.plan_id === targetPlanId || periodStart <= today;
-    const reviewedAt = nowIso();
-    const updated = await payments.updateOne(
-      { id: params.paymentId, status: { $ne: "validated" } },
-      {
-        $set: {
-          status: "validated",
-          reviewed_at: reviewedAt,
-          reviewed_by: params.reviewerUserId,
-          review_note: params.note ?? null,
-          access_period_start: periodStart,
-          access_period_end: periodEnd,
-        },
-      }, { session },
-    );
-    if (updated.modifiedCount !== 1) return { alreadyValidated: true };
-    if (shouldUpdateCurrentSubscription) {
-      await subscriptions.updateOne({ id: subscription.id }, { $set: { plan_id: targetPlanId, status: "active", current_period_end: periodEnd, grace_ends_at: null, updated_at: reviewedAt }, $inc: { row_version: 1 } }, { session });
-    }
-    await recordAudit({ workshopId: String(payment.workshop_id), actorUserId: params.reviewerUserId, action: "platform_payment.validate", entityKind: "platform_payment", entityId: String(payment.id), reason: params.note ?? null, before: { planId: subscription.plan_id, subscriptionEnd: subscription.current_period_end }, after: { planId: shouldUpdateCurrentSubscription ? targetPlanId : subscription.plan_id, subscriptionEnd: shouldUpdateCurrentSubscription ? periodEnd : subscription.current_period_end, scheduledPlanId: targetPlanId, accessPeriodStart: periodStart, accessPeriodEnd: periodEnd } }, session);
-    return { alreadyValidated: false, scheduledForLater: !shouldUpdateCurrentSubscription };
-  });
-}
-
-export async function rejectPlatformPayment(params: { paymentId: string; reviewerUserId: string; note: string }): Promise<void> {
-  const payments = await collection("platform_payments");
-  await payments.updateOne({ id: params.paymentId, status: "declared" }, { $set: { status: "rejected", reviewed_at: nowIso(), reviewed_by: params.reviewerUserId, review_note: params.note } });
-  await recordAudit({ actorUserId: params.reviewerUserId, action: "platform_payment.reject", entityKind: "platform_payment", entityId: params.paymentId, reason: params.note });
-}
-
-export type AuditRow = { id: string; workshop_id: string | null; actor_name: string | null; action: string; entity_kind: string; entity_id: string | null; reason: string | null; created_at: string };
-export async function listAudit(limit = 100): Promise<AuditRow[]> {
-  const audit = await collection("audit_log");
-  return audit.aggregate<AuditRow>([
-    { $sort: { created_at: -1 } }, { $limit: limit },
-    { $lookup: { from: "users", localField: "actor_user_id", foreignField: "id", as: "actor" } },
-    { $set: { actor_name: { $ifNull: [{ $first: "$actor.full_name" }, null] } } },
-    { $project: { _id: 0, actor: 0 } },
-  ]).toArray();
-}
-
-export type TicketRow = { id: string; workshop_id: string | null; workshop_name: string | null; requester_name: string | null; category: string; subject: string; status: string; created_at: string };
-export async function listTickets(status?: string): Promise<TicketRow[]> {
-  const tickets = await collection("tickets");
-  return tickets.aggregate<TicketRow>([
-    { $match: status ? { status } : {} }, { $sort: { created_at: -1 } }, { $limit: 200 },
-    { $lookup: { from: "workshops", localField: "workshop_id", foreignField: "id", as: "workshop" } },
-    { $set: { workshop_name: { $ifNull: [{ $first: "$workshop.name" }, null] } } },
-    { $project: { _id: 0, workshop: 0 } },
-  ]).toArray();
-}
-
-export async function createTicket(params: { workshopId?: string | null; requesterUserId?: string | null; requesterName: string; requesterContact: string; category: string; subject: string; body: string }): Promise<string> {
-  const id = newId(); const timestamp = nowIso(); const tickets = await collection("tickets");
-  await tickets.insertOne({ id, workshop_id: params.workshopId ?? null, requester_user_id: params.requesterUserId ?? null, requester_name: params.requesterName, requester_contact: params.requesterContact, category: params.category, subject: params.subject, body: params.body, status: "open", assignee_user_id: null, created_at: timestamp, updated_at: timestamp });
-  return id;
-}
-
-async function nextPaymentPeriodStart(
-  workshopId: string,
-  currentPeriodEnd: string | null,
-  session?: ClientSession,
-): Promise<string> {
-  const payments = await collection("platform_payments");
-  const latest = await payments.findOne(
-    {
-      workshop_id: workshopId,
-      status: "validated",
-      access_period_end: { $type: "string" },
-    },
-    {
-      projection: { access_period_end: 1 },
-      sort: { access_period_end: -1 },
-      session,
-    },
-  );
-  return maxIsoDate(todayIso(), currentPeriodEnd, latest?.access_period_end ? String(latest.access_period_end) : null);
-}
-
-function addMonths(startIso: string, months: number): string {
-  const date = new Date(`${startIso}T00:00:00Z`);
-  date.setUTCMonth(date.getUTCMonth() + months);
-  return date.toISOString().slice(0, 10);
-}
-
-function maxIsoDate(...values: Array<string | null | undefined>): string {
-  return values.filter((value): value is string => Boolean(value)).sort().at(-1) ?? todayIso();
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import {randomUUID} from "node:crypto";
+import {recordAudit} from "@/lib/audit";
+import {money,type CurrencyCode,type Money} from "@/lib/money";
+import {sql,sqlOne,withPgTransaction,type PgExecutor} from "@/lib/supabase/postgres";
+export type AdminCounts={workshops:number;activeWorkshops:number;trials:number;payingWorkshops:number;expiringSoon:number;openTickets:number;pendingPayments:number};
+export async function getAdminCounts():Promise<AdminCounts>{return(await sqlOne<AdminCounts>(`select
+ (select count(*)::int from public.workshops) workshops,
+ (select count(*)::int from public.workshops where status='active') "activeWorkshops",
+ (select count(*)::int from public.subscriptions where status='trialing') trials,
+ (select count(*)::int from public.subscriptions where status='active') "payingWorkshops",
+ (select count(*)::int from public.subscriptions where status in('trialing','active','past_due') and current_period_end between current_date and current_date+7) "expiringSoon",
+ (select count(*)::int from public.tickets where status<>'resolved') "openTickets",
+ (select count(*)::int from public.platform_payments where status in('declared','provider_pending')) "pendingPayments"`))!;}
+export async function getRevenueByCurrency():Promise<Money[]>{return(await sql<{currency:string;total:number}>("select currency,sum(amount)::int total from public.platform_payments where status='validated' group by currency order by currency")).map(r=>money(r.total,r.currency as CurrencyCode));}
+export type WorkshopAdminRow={id:string;name:string;country_code:string;city:string|null;currency:string;status:string;created_at:string;owner_name:string;member_count:number;subscription_status:string|null;current_period_end:string|null};
+export async function listWorkshops(search=""):Promise<WorkshopAdminRow[]>{return sql<WorkshopAdminRow>(`select w.id,w.name,w.country_code,w.city,w.currency,w.status::text,w.created_at,coalesce(u.full_name,'-') owner_name,count(m.id) filter(where m.status='active')::int member_count,s.status::text subscription_status,s.current_period_end from public.workshops w left join public.app_users u on u.id=w.owner_user_id left join public.memberships m on m.workshop_id=w.id left join public.subscriptions s on s.workshop_id=w.id where ($1='' or w.name ilike '%'||$1||'%') group by w.id,u.full_name,s.status,s.current_period_end order by w.created_at desc limit 200`,[search.trim()]);}
+export type PlatformPaymentRow={id:string;workshop_id:string;workshop_name:string;subscription_id:string;plan_id:string|null;plan_label:string|null;plan_period_months:number|null;subscription_current_period_end:string|null;projected_period_start:string|null;projected_period_end:string|null;amount:number;currency:string;channel:string;external_reference:string|null;status:string;declared_at:string;review_note:string|null};
+export async function listPlatformPayments(status?:string):Promise<PlatformPaymentRow[]>{const rows=await sql<PlatformPaymentRow>(`select pp.id,pp.workshop_id,w.name workshop_name,pp.subscription_id,coalesce(pp.plan_id,s.current_plan_id) plan_id,p.label plan_label,p.period_months plan_period_months,s.current_period_end subscription_current_period_end,pp.amount,pp.currency,pp.channel,pp.external_reference,pp.status::text,pp.declared_at,pp.review_note from public.platform_payments pp join public.workshops w on w.id=pp.workshop_id left join public.subscriptions s on s.id=pp.subscription_id left join public.plans p on p.id=coalesce(pp.plan_id,s.current_plan_id) where ($1::text is null or pp.status::text=$1) order by pp.declared_at desc limit 200`,[status??null]);return Promise.all(rows.map(async r=>{if(!r.plan_period_months)return{...r,projected_period_start:null,projected_period_end:null};const base=await nextPaymentPeriodStart(r.workshop_id,r.subscription_current_period_end);return{...r,projected_period_start:base,projected_period_end:addMonths(base,r.plan_period_months)};}));}
+export async function validatePlatformPayment(params:{paymentId:string;reviewerUserId:string;note?:string|null}):Promise<{alreadyValidated:boolean;scheduledForLater?:boolean}>{return withPgTransaction(async client=>{const payment=await sqlOne<{id:string;workshop_id:string;subscription_id:string;plan_id:string|null;status:string}>("select id,workshop_id,subscription_id,plan_id,status::text from public.platform_payments where id=$1 for update",[params.paymentId],client);if(!payment)throw new Error("Reglement introuvable.");if(payment.status==="validated")return{alreadyValidated:true};const sub=await sqlOne<{id:string;current_plan_id:string;current_period_end:string|null}>("select id,current_plan_id,current_period_end from public.subscriptions where id=$1 for update",[payment.subscription_id],client);if(!sub)throw new Error("Abonnement introuvable.");const target=payment.plan_id??sub.current_plan_id,plan=await sqlOne<{period_months:number}>("select period_months from public.plans where id=$1",[target],client),today=todayIso(),start=await nextPaymentPeriodStart(payment.workshop_id,sub.current_period_end,client),end=addMonths(start,plan?.period_months??1),currentActive=Boolean(sub.current_period_end&&sub.current_period_end>today),update=!currentActive||sub.current_plan_id===target||start<=today;await sql("update public.platform_payments set status='validated',reviewed_at=now(),reviewed_by=$2,review_note=$3 where id=$1",[payment.id,params.reviewerUserId,params.note??null],client);await sql("insert into public.subscription_periods(id,subscription_id,workshop_id,plan_id,source_payment_id,period_start,period_end,status) values($1,$2,$3,$4,$5,$6,$7,$8)",[randomUUID(),sub.id,payment.workshop_id,target,payment.id,start,end,start<=today?"active":"scheduled"],client);if(update)await sql("update public.subscriptions set current_plan_id=$2,status='active',current_period_end=$3,grace_ends_at=null,row_version=row_version+1 where id=$1",[sub.id,target,end],client);await recordAudit({workshopId:payment.workshop_id,actorUserId:params.reviewerUserId,action:"platform_payment.validate",entityKind:"platform_payment",entityId:payment.id,reason:params.note??null,before:{planId:sub.current_plan_id,subscriptionEnd:sub.current_period_end},after:{planId:update?target:sub.current_plan_id,subscriptionEnd:update?end:sub.current_period_end,scheduledPlanId:target,accessPeriodStart:start,accessPeriodEnd:end}},client);return{alreadyValidated:false,scheduledForLater:!update};});}
+export async function rejectPlatformPayment(params:{paymentId:string;reviewerUserId:string;note:string}):Promise<void>{await withPgTransaction(async client=>{const p=await sqlOne<{workshop_id:string}>("update public.platform_payments set status='rejected',reviewed_at=now(),reviewed_by=$2,review_note=$3 where id=$1 and status in('declared','provider_pending') returning workshop_id",[params.paymentId,params.reviewerUserId,params.note],client);if(p)await recordAudit({workshopId:p.workshop_id,actorUserId:params.reviewerUserId,action:"platform_payment.reject",entityKind:"platform_payment",entityId:params.paymentId,reason:params.note},client);});}
+export type AuditRow={id:string;workshop_id:string|null;actor_name:string|null;action:string;entity_kind:string;entity_id:string|null;reason:string|null;created_at:string};
+export async function listAudit(limit=100):Promise<AuditRow[]>{return sql<AuditRow>("select a.id,a.workshop_id,u.full_name actor_name,a.action,a.entity_kind,a.entity_id,a.reason,a.created_at from public.audit_log a left join public.app_users u on u.id=a.actor_user_id order by a.created_at desc limit $1",[limit]);}
+export type TicketRow={id:string;workshop_id:string|null;workshop_name:string|null;requester_name:string|null;category:string;subject:string;status:string;created_at:string};
+export async function listTickets(status?:string):Promise<TicketRow[]>{return sql<TicketRow>("select t.id,t.workshop_id,w.name workshop_name,t.requester_name,t.category,t.subject,t.status::text,t.created_at from public.tickets t left join public.workshops w on w.id=t.workshop_id where ($1::text is null or t.status::text=$1) order by t.created_at desc limit 200",[status??null]);}
+export async function createTicket(params:{workshopId?:string|null;requesterUserId?:string|null;requesterName:string;requesterContact:string;category:string;subject:string;body:string}):Promise<string>{const id=randomUUID();await sql("insert into public.tickets(id,workshop_id,requester_user_id,requester_name,requester_contact,category,subject,body,status) values($1,$2,$3,$4,$5,$6,$7,$8,'open')",[id,params.workshopId??null,params.requesterUserId??null,params.requesterName,params.requesterContact,params.category,params.subject,params.body]);return id;}
+async function nextPaymentPeriodStart(workshopId:string,currentEnd:string|null,e?:PgExecutor):Promise<string>{const row=await sqlOne<{period_end:string}>("select period_end from public.subscription_periods where workshop_id=$1 and status in('active','scheduled') order by period_end desc limit 1",[workshopId],e);return maxIsoDate(todayIso(),currentEnd,row?.period_end);}
+function addMonths(start:string,months:number){const d=new Date(`${start}T00:00:00Z`);d.setUTCMonth(d.getUTCMonth()+months);return d.toISOString().slice(0,10);}function maxIsoDate(...v:Array<string|null|undefined>){return v.filter((x):x is string=>Boolean(x)).sort().at(-1)??todayIso();}function todayIso(){return new Date().toISOString().slice(0,10);}
