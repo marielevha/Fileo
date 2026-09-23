@@ -22,11 +22,26 @@ type ItemRow = {
   measurements: string;
 };
 
+type ArticleTemplateOption = {
+  id: string;
+  name: string;
+  defaultWorkType: "creation" | "retouche";
+  fields: Array<{ label: string; unit?: string }>;
+};
+
+type MeasurementDraftRow = {
+  id: string;
+  label: string;
+  value: string;
+  unit: string;
+};
+
 const initialState: OrderFormState = {};
+const DEFAULT_MEASUREMENT_UNITS = ["cm", "mm", "m"];
 
 function newRow(): ItemRow {
   return {
-    id: crypto.randomUUID(),
+    id: makeClientId(),
     category: "",
     description: "",
     workType: "creation",
@@ -44,6 +59,8 @@ export default function CreateOrderForm({
   today,
   paymentIdempotencyKey,
   cancelHref,
+  articleTemplates,
+  measurementUnits,
 }: {
   clients: ClientOption[];
   canViewMoney: boolean;
@@ -51,10 +68,14 @@ export default function CreateOrderForm({
   today: string;
   paymentIdempotencyKey: string;
   cancelHref: string;
+  articleTemplates: ArticleTemplateOption[];
+  measurementUnits: string[];
 }) {
   const [state, formAction, pending] = useActionState(createOrderAction, initialState);
   const [rows, setRows] = useState<ItemRow[]>([]);
   const [draft, setDraft] = useState<ItemRow>(newRow());
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [measurementRows, setMeasurementRows] = useState<MeasurementDraftRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -71,6 +92,14 @@ export default function CreateOrderForm({
     () => clients.find((client) => client.id === clientId),
     [clientId, clients],
   );
+  const selectedTemplate = useMemo(
+    () => articleTemplates.find((template) => template.id === selectedTemplateId) ?? null,
+    [articleTemplates, selectedTemplateId],
+  );
+  const unitOptions = useMemo(() => {
+    const configured = measurementUnits.length ? measurementUnits : DEFAULT_MEASUREMENT_UNITS;
+    return Array.from(new Set([...configured, ...measurementRows.map((row) => row.unit).filter(Boolean)]));
+  }, [measurementRows, measurementUnits]);
   const itemsTotal = useMemo(
     () => rows.reduce((total, row) => total + parseAmountInput(row.unitPrice), 0),
     [rows],
@@ -88,12 +117,17 @@ export default function CreateOrderForm({
     if (editingId === id) {
       setEditingId(null);
       setDraft(newRow());
+      setSelectedTemplateId("");
+      setMeasurementRows([]);
       setEditorOpen(false);
     }
   }
 
   function editRow(row: ItemRow) {
     setDraft(row);
+    const template = articleTemplates.find((item) => item.name === row.category) ?? null;
+    setSelectedTemplateId(template?.id ?? "");
+    setMeasurementRows(template ? rowsFromTemplate(template, row.measurements) : []);
     setEditingId(row.id);
     setDraftError(null);
     setEditorOpen(true);
@@ -116,18 +150,60 @@ export default function CreateOrderForm({
       category,
       description,
       wearerName: draft.wearerName.trim(),
-      measurements: draft.measurements.trim(),
+      measurements: selectedTemplate ? serialiseMeasurementRows(measurementRows) : draft.measurements.trim(),
       unitPrice: draft.unitPrice.trim() || "0",
     };
 
     setRows((current) => (
       editingId
         ? current.map((item) => (item.id === editingId ? row : item))
-        : [...current, { ...row, id: crypto.randomUUID() }]
+        : [...current, { ...row, id: makeClientId() }]
     ));
     setEditingId(null);
     setDraft(newRow());
+    setSelectedTemplateId("");
+    setMeasurementRows([]);
     setEditorOpen(false);
+  }
+
+  function applyTemplate(templateId: string) {
+    setSelectedTemplateId(templateId);
+    const template = articleTemplates.find((item) => item.id === templateId);
+    if (!template) {
+      setMeasurementRows([]);
+      return;
+    }
+    const rows = rowsFromTemplate(template, draft.measurements);
+    setMeasurementRows(rows);
+    updateDraft({
+      category: template.name,
+      workType: template.defaultWorkType,
+      measurements: serialiseMeasurementRows(rows),
+    });
+  }
+
+  function updateMeasurementRow(id: string, values: Partial<MeasurementDraftRow>) {
+    setMeasurementRows((current) => {
+      const next = current.map((row) => (row.id === id ? { ...row, ...values } : row));
+      updateDraft({ measurements: serialiseMeasurementRows(next) });
+      return next;
+    });
+  }
+
+  function addMeasurementRow() {
+    setMeasurementRows((current) => {
+      const next = [...current, { id: makeClientId(), label: "", value: "", unit: unitOptions[0] ?? "cm" }];
+      updateDraft({ measurements: serialiseMeasurementRows(next) });
+      return next;
+    });
+  }
+
+  function removeMeasurementRow(id: string) {
+    setMeasurementRows((current) => {
+      const next = current.filter((row) => row.id !== id);
+      updateDraft({ measurements: serialiseMeasurementRows(next) });
+      return next;
+    });
   }
 
   function confirmInlineClient() {
@@ -296,6 +372,8 @@ export default function CreateOrderForm({
               type="button"
               onClick={() => {
                 setDraft(newRow());
+                setSelectedTemplateId("");
+                setMeasurementRows([]);
                 setEditingId(null);
                 setDraftError(null);
                 setEditorOpen((open) => !open);
@@ -310,7 +388,23 @@ export default function CreateOrderForm({
         <div className="space-y-6 p-5">
           {editorOpen ? (
           <div className="rounded-xl border border-base-300 bg-base-200/25 p-4">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_10rem]">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem]">
+              <label className="form-control">
+                <span className="label-text mb-2 font-medium">Modele</span>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(event) => applyTemplate(event.target.value)}
+                  className="select select-bordered w-full"
+                >
+                  <option value="">Saisie libre</option>
+                  {articleTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <label className="form-control">
                 <span className="label-text mb-2 font-medium">Article</span>
                 <input
@@ -387,16 +481,80 @@ export default function CreateOrderForm({
                 />
               </label>
 
-              <label className="form-control">
+              <div className="form-control">
                 <span className="label-text mb-2 font-medium">Mensurations</span>
-                <textarea
-                  value={draft.measurements}
-                  onChange={(event) => updateDraft({ measurements: event.target.value })}
-                  rows={4}
-                  placeholder={"Tour poitrine: 92\nTour taille: 74\nLongueur: 110"}
-                  className="textarea textarea-bordered w-full text-sm"
-                />
-              </label>
+                {selectedTemplate ? (
+                  <div className="overflow-hidden rounded-xl border border-base-300 bg-base-100">
+                    <table className="table table-sm">
+                      <thead>
+                        <tr>
+                          <th>Mesure</th>
+                          <th>Valeur</th>
+                          <th>Unite</th>
+                          <th className="w-10" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {measurementRows.map((row) => (
+                          <tr key={row.id}>
+                            <td>
+                              <input
+                                value={row.label}
+                                onChange={(event) => updateMeasurementRow(row.id, { label: event.target.value })}
+                                placeholder="Poitrine"
+                                className="input input-bordered input-sm w-full"
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={row.value}
+                                onChange={(event) => updateMeasurementRow(row.id, { value: event.target.value })}
+                                inputMode="decimal"
+                                placeholder="0"
+                                className="input input-bordered input-sm w-full"
+                              />
+                            </td>
+                            <td>
+                              <select
+                                value={row.unit}
+                                onChange={(event) => updateMeasurementRow(row.id, { unit: event.target.value })}
+                                className="select select-bordered select-sm w-full"
+                              >
+                                {unitOptions.map((unit) => (
+                                  <option key={unit} value={unit}>{unit}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="w-10">
+                              <button
+                                type="button"
+                                onClick={() => removeMeasurementRow(row.id)}
+                                className="btn btn-ghost btn-square btn-xs"
+                                aria-label="Retirer la mesure"
+                              >
+                                <Icon name="trash" className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="border-t border-base-300 p-2 text-right">
+                      <button type="button" onClick={addMeasurementRow} className="btn btn-ghost btn-sm">
+                        Ajouter une mesure
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <textarea
+                    value={draft.measurements}
+                    onChange={(event) => updateDraft({ measurements: event.target.value })}
+                    rows={4}
+                    placeholder={"Tour poitrine: 92\nTour taille: 74\nLongueur: 110"}
+                    className="textarea textarea-bordered w-full text-sm"
+                  />
+                )}
+              </div>
             </div>
 
             {draftError ? <p className="alert alert-error mt-4 py-3 text-sm">{draftError}</p> : null}
@@ -408,6 +566,8 @@ export default function CreateOrderForm({
                   onClick={() => {
                     setEditingId(null);
                     setDraft(newRow());
+                    setSelectedTemplateId("");
+                    setMeasurementRows([]);
                     setDraftError(null);
                     setEditorOpen(false);
                   }}
@@ -420,6 +580,8 @@ export default function CreateOrderForm({
                   type="button"
                   onClick={() => {
                     setDraft(newRow());
+                    setSelectedTemplateId("");
+                    setMeasurementRows([]);
                     setDraftError(null);
                     setEditorOpen(false);
                   }}
@@ -666,6 +828,59 @@ export default function CreateOrderForm({
       ) : null}
     </form>
   );
+}
+
+function makeClientId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `item-${Date.now().toString(36)}-${randomPart}`;
+}
+
+function rowsFromTemplate(template: ArticleTemplateOption, currentMeasurements: string): MeasurementDraftRow[] {
+  const values = parseMeasurementLines(currentMeasurements);
+  return template.fields.map((field) => {
+    const parsed = values.get(normaliseMeasurementKey(field.label));
+    return {
+      id: makeClientId(),
+      label: field.label,
+      value: parsed?.value ?? "",
+      unit: parsed?.unit || field.unit || "cm",
+    };
+  });
+}
+
+function parseMeasurementLines(value: string) {
+  const rows = new Map<string, { value: string; unit: string }>();
+  for (const rawLine of value.split(/\r?\n/)) {
+    const separator = rawLine.indexOf(":");
+    if (separator < 0) continue;
+    const label = rawLine.slice(0, separator).trim();
+    const rawValue = rawLine.slice(separator + 1).trim();
+    if (!label) continue;
+    const match = rawValue.match(/^(.+?)\s+([a-z0-9%°"'/-]{1,12})$/i);
+    rows.set(normaliseMeasurementKey(label), {
+      value: (match?.[1] ?? rawValue).trim(),
+      unit: (match?.[2] ?? "").trim(),
+    });
+  }
+  return rows;
+}
+
+function serialiseMeasurementRows(rows: MeasurementDraftRow[]) {
+  return rows
+    .map((row) => {
+      const label = row.label.trim();
+      if (!label) return "";
+      const value = row.value.trim();
+      const unit = row.unit.trim();
+      return `${label}: ${value}${value && unit ? ` ${unit}` : ""}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normaliseMeasurementKey(value: string) {
+  return value.trim().toLocaleLowerCase("fr-FR");
 }
 
 function parseAmountInput(value: string): number {

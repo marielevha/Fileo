@@ -10,19 +10,28 @@ export type StoredAuthSession = {
   refreshToken: string;
   expiresAt: string;
   persist: boolean;
+  userId?: string;
+  workshopId?: string;
+  currency?: string;
+  measurementUnits?: string[];
 };
 
 let memorySession: StoredAuthSession | null = null;
 
 export async function saveAuthSession(
-  session: Pick<LoginResponse, 'token' | 'refreshToken' | 'expiresAt'>,
+  session: Pick<LoginResponse, 'token' | 'refreshToken' | 'expiresAt'> & Partial<Pick<LoginResponse, 'user' | 'workshop'>>,
   persist: boolean,
 ) {
+  const previous = memorySession;
   memorySession = {
     token: session.token,
     refreshToken: session.refreshToken,
     expiresAt: session.expiresAt,
     persist,
+    userId: session.user?.id ?? previous?.userId,
+    workshopId: session.workshop?.id ?? previous?.workshopId,
+    currency: session.workshop?.currency ?? previous?.currency,
+    measurementUnits: session.workshop?.measurementUnits ?? previous?.measurementUnits,
   };
   const serialised = JSON.stringify(memorySession);
 
@@ -57,6 +66,10 @@ export async function getAuthSession(): Promise<StoredAuthSession | null> {
       refreshToken: parsed.refreshToken,
       expiresAt: parsed.expiresAt,
       persist: true,
+      userId: parsed.userId,
+      workshopId: parsed.workshopId,
+      currency: parsed.currency,
+      measurementUnits: parsed.measurementUnits,
     };
     return memorySession;
   } catch {

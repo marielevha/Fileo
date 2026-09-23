@@ -6,11 +6,10 @@ import { getLocale } from "@/lib/i18n/request";
 import { getMessages } from "@/lib/i18n/messages";
 import { localePath } from "@/lib/i18n/config";
 
-/** FAQ entries are editorial content, managed from the back-office (§12.4). */
 export default async function FaqPreview({ limit = 5 }: { limit?: number }) {
   const locale = await getLocale();
   const copy = getMessages(locale).faq;
-  const entries = await listPublished("faq", limit);
+  const entries = await listPublished("faq", limit, locale);
 
   if (entries.length === 0) return null;
 
@@ -27,7 +26,7 @@ export default async function FaqPreview({ limit = 5 }: { limit?: number }) {
             <Reveal key={entry.id} delay={index * 70}>
               <details className="group bg-base-100 border-base-300 rounded-2xl border p-5 [&_summary::-webkit-details-marker]:hidden">
                 <summary className="flex cursor-pointer items-center justify-between gap-4 font-semibold">
-                  {copy.entries[index]?.[0] ?? entry.title}
+                  {entry.title}
                   <span
                     aria-hidden="true"
                     className="text-primary shrink-0 text-xl transition-transform group-open:rotate-45"
@@ -36,7 +35,7 @@ export default async function FaqPreview({ limit = 5 }: { limit?: number }) {
                   </span>
                 </summary>
                 <p className="text-base-content/70 mt-3 text-sm leading-relaxed text-pretty">
-                  {copy.entries[index]?.[1] ?? entry.body}
+                  {entry.body}
                 </p>
               </details>
             </Reveal>

@@ -4,6 +4,7 @@ export type WorkshopDetails = {
   country_code: string;
   currency: string;
   timezone: string;
+  measurement_units_json?: string | string[];
 };
 
 export type TeamMember = {

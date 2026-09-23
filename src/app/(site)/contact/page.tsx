@@ -4,13 +4,15 @@ import Icon from "@/components/ui/Icon";
 import PageHero from "@/components/ui/PageHero";
 import Reveal from "@/components/ui/Reveal";
 import { site } from "@/lib/site";
+import { getSupportContact } from "@/lib/repos/support-contact";
 
 export const metadata: Metadata = {
   title: "Contact",
   description: `Contacter l'assistance ${site.name}.`,
 };
 
-export default function ContactPage() {
+export default async function ContactPage() {
+  const { email: supportEmail } = await getSupportContact();
   return (
     <>
       <PageHero
@@ -32,10 +34,10 @@ export default function ContactPage() {
                 </span>
                 <h2 className="font-display mt-4 font-bold">Par email</h2>
                 <a
-                  href={`mailto:${site.supportEmail}`}
+                  href={`mailto:${supportEmail}`}
                   className="link link-primary mt-1 block text-sm break-words"
                 >
-                  {site.supportEmail}
+                  {supportEmail}
                 </a>
               </div>
             </Reveal>

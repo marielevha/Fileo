@@ -6,6 +6,7 @@ import { verifyPassword } from "@/lib/auth/password";
 import type { PlatformRole, WorkshopRole } from "@/lib/permissions";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sqlOne } from "@/lib/supabase/postgres";
+import { parseMeasurementUnitsJson } from "@/lib/repos/workshops";
 
 function authConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -115,7 +116,7 @@ export async function getSupabaseSession(token: string): Promise<SessionContext 
 
   const { data: workshop, error: workshopError } = await admin
     .from("workshops")
-    .select("id, name, currency, country_code, timezone, status")
+    .select("id, name, currency, country_code, timezone, status, measurement_units_json")
     .eq("id", membership.workshop_id)
     .maybeSingle();
   if (workshopError) throw workshopError;
@@ -139,6 +140,7 @@ export async function getSupabaseSession(token: string): Promise<SessionContext 
       status: workshop.status,
       role,
       canViewMoney,
+      measurementUnits: parseMeasurementUnitsJson(workshop.measurement_units_json),
     },
   };
 }

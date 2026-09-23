@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import PageHeader from "@/components/app/PageHeader";
+import OrderAttachments from "@/components/orders/OrderAttachments";
 import Icon from "@/components/ui/Icon";
 import { requireWorkshop } from "@/lib/auth/guards";
 import { formatMoney, money, multiply, type CurrencyCode } from "@/lib/money";
@@ -131,32 +132,7 @@ export default async function OrderDetailPage({
                 Aucune photo ou note jointe a cette commande.
               </p>
             ) : (
-              <ul className="divide-base-300 divide-y">
-                {attachments.map((attachment) => (
-                  <li key={attachment.id} className="flex items-center gap-4 px-6 py-3.5">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {attachment.original_filename}
-                      </span>
-                      <span className="text-base-content/55 block text-xs">
-                        {formatFileSize(attachment.size_bytes)} · {attachment.mime_type}
-                      </span>
-                    </span>
-                    {attachment.signed_url ? (
-                      <Link
-                        href={attachment.signed_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-ghost btn-sm"
-                      >
-                        Ouvrir
-                      </Link>
-                    ) : (
-                      <span className="badge badge-warning badge-sm">Lien indisponible</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <OrderAttachments attachments={attachments} />
             )}
           </section>
 
@@ -354,10 +330,4 @@ function Row({ label, value }: { label: string; value: string }) {
       <dd className="font-medium">{value}</dd>
     </div>
   );
-}
-
-function formatFileSize(size: number) {
-  if (size < 1024) return `${size} o`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} Ko`;
-  return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
 }

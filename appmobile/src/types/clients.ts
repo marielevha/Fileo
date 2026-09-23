@@ -15,6 +15,7 @@ export type Client = {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
+  row_version: number;
 };
 
 export type ClientListItem = Client & {

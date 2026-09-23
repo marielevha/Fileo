@@ -3,13 +3,13 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { recordAudit } from "@/lib/audit";
 import { normaliseDigits } from "@/lib/phone";
-import { sql, sqlOne, withPgTransaction } from "@/lib/supabase/postgres";
+import { sql, sqlOne, withPgTransaction, type PgExecutor } from "@/lib/supabase/postgres";
 
 export type ClientRow = {
   id: string; workshop_id: string; display_name: string; phone_e164: string | null;
   phone_search: string | null; other_contact: string | null; guardian_name: string | null;
   guardian_phone: string | null; notes: string | null; archived_at: string | null;
-  deleted_at: string | null; created_at: string; updated_at: string;
+  deleted_at: string | null; created_at: string; updated_at: string; row_version: number;
 };
 export type ClientListItem = ClientRow & { order_count: number; last_order_at: string | null };
 export type ClientSort = "name" | "phone" | "orders" | "lastOrder" | "createdAt";
@@ -50,7 +50,7 @@ export async function listClients(workshopId: string, options: {
   values.push(pageSize, (page - 1) * pageSize);
   const items = await sql<ClientListItem>(`
     select c.id, c.workshop_id, c.display_name, c.phone_e164, c.phone_search, c.other_contact,
-      c.guardian_name, c.guardian_phone, c.notes, c.archived_at, c.deleted_at, c.created_at, c.updated_at,
+      c.guardian_name, c.guardian_phone, c.notes, c.archived_at, c.deleted_at, c.created_at, c.updated_at, c.row_version,
       count(o.id)::int as order_count, max(o.created_at) as last_order_at
     from public.clients c left join public.orders o on o.client_id = c.id
     where ${where}
@@ -133,16 +133,18 @@ export async function latestMeasurements(workshopId:string,clientId:string):Prom
   return sql<MeasurementRow>(`select distinct on(category) id,client_id,category,version,values_json::text,unit,notes,taken_at,created_at
     from public.measurement_records where workshop_id=$1 and client_id=$2 order by category,version desc`,[workshopId,clientId]);
 }
-export async function addMeasurementVersion(params:{workshopId:string;clientId:string;actorUserId:string;category:string;values:Record<string,number|null>;notes?:string|null;takenAt?:string}):Promise<string>{
-  const id=randomUUID();
-  return withPgTransaction(async client=>{
-    await sql("select id from public.clients where id=$1 and workshop_id=$2 for update",[params.clientId,params.workshopId],client);
+export async function addMeasurementVersion(params:{workshopId:string;clientId:string;actorUserId:string;category:string;values:Record<string,number|null>;notes?:string|null;takenAt?:string;id?:string;mobileOperationId?:string},executor?:PgExecutor):Promise<string>{
+  const id=params.id??randomUUID();
+  const work=async(client:PgExecutor)=>{
+    const parent=await sqlOne("select id from public.clients where id=$1 and workshop_id=$2 and deleted_at is null for update",[params.clientId,params.workshopId],client);
+    if(!parent)throw new Error("Client introuvable pour ces mensurations.");
     const previous=await sqlOne<{version:number}>("select version from public.measurement_records where workshop_id=$1 and client_id=$2 and category=$3 order by version desc limit 1",[params.workshopId,params.clientId,params.category],client);
     const version=(previous?.version ?? 0)+1;
     await sql(`insert into public.measurement_records(id,workshop_id,client_id,category,version,values_json,unit,notes,taken_at,created_by)
       values($1,$2,$3,$4,$5,$6::jsonb,'cm',$7,coalesce($8::timestamptz,now()),$9)`,[id,params.workshopId,params.clientId,params.category,version,JSON.stringify(params.values),params.notes ?? null,params.takenAt ?? null,params.actorUserId],client);
-    await recordAudit({workshopId:params.workshopId,actorUserId:params.actorUserId,action:"measurement.create",entityKind:"measurement_record",entityId:id,after:{category:params.category,version}},client);
+    await recordAudit({workshopId:params.workshopId,actorUserId:params.actorUserId,action:"measurement.create",entityKind:"measurement_record",entityId:id,after:{category:params.category,version},mobileOperationId:params.mobileOperationId},client);
     return id;
-  });
+  };
+  return executor?work(executor):withPgTransaction(work);
 }
 export function isMeasurementStale(takenAt:string,monthsThreshold=6):boolean{const limit=new Date();limit.setMonth(limit.getMonth()-monthsThreshold);return new Date(takenAt)<limit;}

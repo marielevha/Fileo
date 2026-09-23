@@ -29,6 +29,7 @@ export type PlanningItem = {
 export type PlanningResponse = {
   items: PlanningItem[];
   members: PlanningMember[];
+  truncated?: boolean;
 };
 
 export type PlanningStatusFilter = ItemStatus | 'active' | 'all';

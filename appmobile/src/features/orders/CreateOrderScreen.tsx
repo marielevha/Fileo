@@ -1,27 +1,21 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createOrder, getBootstrap, searchClients, uploadOrderAttachments } from '../../api/client';
 import { AppText } from '../../components/AppText';
 import { AttachmentPicker, type AttachmentDraft } from '../../components/AttachmentPicker';
 import { DateField } from '../../components/DateField';
+import { MeasurementRowsEditor } from '../../components/MeasurementRowsEditor';
 import { palette, useAppTheme } from '../../theme';
+import type { ArticleTemplate } from '../../types/dashboard';
 import type { ClientOption, CreateOrderRequest } from '../../types/orders';
 import { formatDate, formatMoney, todayKey } from './orderUi';
+import { clearOrderDraft, loadOrderDraft, persistOrderDraft, saveOrderDraft, type OrderDraft, type OrderDraftItem } from './orderDraft';
 
-type DraftItem = {
-  id: string;
-  category: string;
-  description: string;
-  workType: 'creation' | 'retouche';
-  wearerName: string;
-  unitPrice: string;
-  dueDate: string;
-  measurements: string;
-};
+type DraftItem = OrderDraftItem;
 type PaymentMethod = 'cash' | 'mobile_money' | 'transfer' | 'other';
 const paymentMethodLabels: Record<PaymentMethod, string> = { cash: 'Espèces', mobile_money: 'Mobile money', transfer: 'Virement', other: 'Autre' };
 
@@ -31,7 +25,7 @@ const emptyItem = (): DraftItem => ({ id: `${Date.now()}-${Math.random()}`, cate
 export function CreateOrderScreen() {
   const theme = useAppTheme(); const router = useRouter(); const scrollRef = useRef<ScrollView>(null);
   const params = useLocalSearchParams<{ clientId?: string; clientName?: string; clientPhone?: string }>();
-  const [step, setStep] = useState(0); const [canViewMoney, setCanViewMoney] = useState(false); const [currency, setCurrency] = useState('XAF');
+  const [step, setStep] = useState(0); const [canViewMoney, setCanViewMoney] = useState(false); const [currency, setCurrency] = useState('XAF'); const [measurementUnits, setMeasurementUnits] = useState<string[]>(['cm', 'mm', 'm']); const [articleTemplates, setArticleTemplates] = useState<ArticleTemplate[]>([]);
   const [clientMode, setClientMode] = useState<'existing' | 'new'>('existing');
   const [clientQuery, setClientQuery] = useState(params.clientName ?? ''); const [clients, setClients] = useState<ClientOption[]>([]);
   const [selectedClient, setSelectedClient] = useState<ClientOption | null>(params.clientId && params.clientName ? { id: params.clientId, display_name: params.clientName, phone_e164: params.clientPhone || null } : null);
@@ -40,11 +34,40 @@ export function CreateOrderScreen() {
   const [items, setItems] = useState<DraftItem[]>([]); const [draft, setDraft] = useState<DraftItem>(emptyItem()); const [editingId, setEditingId] = useState<string | null>(null); const [showItemDetails, setShowItemDetails] = useState(false);
   const [manualTotal, setManualTotal] = useState(''); const [payment, setPayment] = useState(''); const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash'); const [paymentReference, setPaymentReference] = useState('');
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftSaveError, setDraftSaveError] = useState(false);
   const [loadingClients, setLoadingClients] = useState(true); const [submitting, setSubmitting] = useState(false); const [error, setError] = useState<string | null>(null); const [itemError, setItemError] = useState<string | null>(null);
 
-  useEffect(() => { void getBootstrap().then((data) => { setCanViewMoney(data.capabilities.canViewMoney); setCurrency(data.workshop.currency); }).catch(() => undefined); }, []);
+  useEffect(() => { void getBootstrap().then((data) => { setCanViewMoney(data.capabilities.canViewMoney); setCurrency(data.workshop.currency); setMeasurementUnits(data.workshop.measurementUnits?.length ? data.workshop.measurementUnits : ['cm', 'mm', 'm']); setArticleTemplates(data.articleTemplates ?? []); }).catch(() => undefined); }, []);
   useEffect(() => {
     let active = true;
+    void loadOrderDraft().then((saved) => {
+      if (!active) return;
+      if (!saved) { setDraftReady(true); return; }
+      const restore = () => {
+        if (!active) return;
+        setStep(saved.step); setClientMode(saved.clientMode); setClientQuery(saved.clientQuery);
+        setSelectedClient(saved.selectedClient); setNewClientName(saved.newClientName); setNewClientPhone(saved.newClientPhone);
+        setPromisedDate(saved.promisedDate); setFittingDate(saved.fittingDate); setInstructions(saved.instructions);
+        setItems(saved.items); setDraft(saved.draft); setManualTotal(saved.manualTotal); setPayment(saved.payment);
+        setPaymentMethod(saved.paymentMethod); setPaymentReference(saved.paymentReference); setAttachments(saved.attachments);
+        setDraftReady(true);
+      };
+      const discard = () => { void clearOrderDraft().finally(() => { if (active) setDraftReady(true); }); };
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.confirm('Reprendre la commande en cours ?')) restore(); else discard();
+      } else Alert.alert('Commande en cours', 'Reprendre votre brouillon ?', [
+        { text: 'Nouvelle commande', onPress: discard }, { text: 'Reprendre', onPress: restore },
+      ], { cancelable: false });
+    }).catch(() => { if (active) setDraftReady(true); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    if (selectedClient || clientMode !== 'existing') {
+      setLoadingClients(false);
+      return () => { active = false; };
+    }
     const query = clientQuery.trim();
     if (query.length === 1) {
       setLoadingClients(false);
@@ -55,13 +78,31 @@ export function CreateOrderScreen() {
       void searchClients(query).then((rows) => { if (active) setClients((current) => mergeClients(current, rows)); }).catch(() => undefined).finally(() => { if (active) setLoadingClients(false); });
     }, query ? 220 : 0);
     return () => { active = false; clearTimeout(timeout); };
-  }, [clientQuery]);
+  }, [clientMode, clientQuery, selectedClient]);
 
   const itemsTotal = useMemo(() => items.reduce((sum, item) => sum + integer(item.unitPrice), 0), [items]);
   const orderTotal = itemsTotal > 0 ? itemsTotal : integer(manualTotal);
   const remaining = Math.max(0, orderTotal - integer(payment));
   const clientName = clientMode === 'existing' ? selectedClient?.display_name : newClientName.trim();
   const visibleClients = useMemo(() => filterClients(clients, clientQuery), [clientQuery, clients]);
+  const orderDraft: OrderDraft = { step, clientMode, clientQuery, selectedClient, newClientName, newClientPhone,
+    promisedDate, fittingDate, instructions, items, draft, manualTotal, payment, paymentMethod, paymentReference, attachments };
+  const latestDraft = useRef(orderDraft);
+  latestDraft.current = orderDraft;
+  useEffect(() => {
+    if (!draftReady || submitting) return;
+    const timer = setTimeout(() => {
+      void persistOrderDraft(latestDraft.current).then(() => setDraftSaveError(false)).catch(() => setDraftSaveError(true));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [draftReady, submitting, step, clientMode, clientQuery, selectedClient, newClientName, newClientPhone,
+    promisedDate, fittingDate, instructions, items, draft, manualTotal, payment, paymentMethod, paymentReference, attachments]);
+  useEffect(() => {
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && draftReady) void persistOrderDraft(latestDraft.current).catch(() => undefined);
+    });
+    return () => listener.remove();
+  }, [draftReady]);
 
   function commitDraft() {
     if (draft.category.trim().length < 2) { setItemError("Indiquez le type d'article."); return false; }
@@ -80,6 +121,10 @@ export function CreateOrderScreen() {
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   }
 
+  function changeClientQuery(value: string) { setClientQuery(value); setSelectedClient(null); setError(null); }
+  function selectClient(value: ClientOption) { setSelectedClient(value); setError(null); }
+  function clearClientSelection() { setSelectedClient(null); setClientQuery(''); }
+
   function continueWizard() {
     setError(null);
     if (step === 0) {
@@ -93,9 +138,11 @@ export function CreateOrderScreen() {
     move(Math.min(steps.length - 1, step + 1));
   }
 
-  function previous() { if (step > 0) move(step - 1); else router.back(); }
+  function previous() { if (step > 0) move(step - 1); else { void persistOrderDraft(latestDraft.current).catch(() => undefined); router.back(); } }
 
   async function submit() {
+    if (clientMode === 'existing' && !selectedClient) { move(0); return setError('Sélectionnez un client.'); }
+    if (clientMode === 'new' && newClientName.trim().length < 2) { move(0); return setError('Indiquez le nom du nouveau client.'); }
     if (!items.length) { move(1); return setError('Ajoutez au moins un article.'); }
     setSubmitting(true); setError(null);
     const payload: CreateOrderRequest = {
@@ -108,27 +155,38 @@ export function CreateOrderScreen() {
       initialPayment: canViewMoney && integer(payment) > 0 ? { amount: integer(payment), method: paymentMethod, reference: paymentReference.trim() || null, effectiveDate: todayKey(), idempotencyKey: `mobile-order:${Date.now()}:${Math.random().toString(36).slice(2)}` } : null,
     };
     try {
+      await saveOrderDraft(orderDraft);
+      const durableAttachments = (await loadOrderDraft())?.attachments ?? attachments;
       const result = await createOrder(payload);
-      if (attachments.length) {
-        try { await uploadOrderAttachments(result.orderId, attachments); }
-        catch (caught) { Alert.alert('Commande créée, envoi incomplet', caught instanceof Error ? caught.message : "Certaines pièces jointes n'ont pas pu être envoyées. Vous pourrez les ajouter depuis sa fiche."); }
+      let attachmentFailed = false;
+      if (durableAttachments.length) {
+        try { await uploadOrderAttachments(result.orderId, durableAttachments); }
+        catch { attachmentFailed = true; }
       }
+      setDraftReady(false);
+      await clearOrderDraft().catch(() => undefined);
+      if (result.issue) Alert.alert('Commande à vérifier', 'La commande est enregistrée, mais certaines informations demandent une vérification. Consultez le suivi dans Plus.');
+      else if (attachmentFailed) Alert.alert('Commande enregistrée', "Certaines photos n'ont pas pu être ajoutées. Réessayez depuis la fiche de la commande.");
+      else Alert.alert('Commande enregistrée');
       router.replace({ pathname: '/atelier/commandes/[id]', params: { id: result.orderId } });
     }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Impossible de créer la commande.'); }
     finally { setSubmitting(false); }
   }
 
+  if (!draftReady) return <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]}><ActivityIndicator color={theme.colors.primary} size="large" style={styles.draftLoader} /></SafeAreaView>;
+
   return <SafeAreaView style={[styles.safeArea,{backgroundColor:theme.colors.background}]}>
     <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={styles.flex}>
       <View style={styles.topBar}><Pressable accessibilityLabel={step?'Étape précédente':'Retour'} onPress={previous} style={[styles.iconButton,{borderColor:theme.colors.border}]}><ArrowLeft color={theme.colors.text} size={21}/></Pressable><View style={styles.heading}><AppText variant="title2">Nouvelle commande</AppText><AppText color={theme.colors.textMuted} variant="caption">Étape {step+1} sur {steps.length} · {steps[step]}</AppText></View></View>
       <StepIndicator current={step} onSelect={(index)=>index<step&&move(index)}/>
       <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {step===0?<ClientStep clientMode={clientMode} clientQuery={clientQuery} clients={visibleClients} loading={loadingClients} newClientName={newClientName} newClientPhone={newClientPhone} selectedClient={selectedClient} setClientMode={setClientMode} setClientQuery={setClientQuery} setNewClientName={setNewClientName} setNewClientPhone={setNewClientPhone} setSelectedClient={setSelectedClient}/>:null}
-        {step===1?<ArticlesStep canViewMoney={canViewMoney} currency={currency} draft={draft} editingId={editingId} error={itemError} items={items} onCancelEdit={cancelEdit} onCommit={commitDraft} onEdit={editItem} onRemove={(id)=>setItems((rows)=>rows.filter((row)=>row.id!==id))} setDraft={setDraft} setShowDetails={setShowItemDetails} showDetails={showItemDetails}/>:null}
+        {step===0?<ClientStep clientMode={clientMode} clientQuery={clientQuery} clients={visibleClients} loading={loadingClients} newClientName={newClientName} newClientPhone={newClientPhone} selectedClient={selectedClient} setClientMode={setClientMode} setClientQuery={changeClientQuery} setNewClientName={setNewClientName} setNewClientPhone={setNewClientPhone} setSelectedClient={selectClient} onClearSelection={clearClientSelection}/>:null}
+        {step===1?<ArticlesStep articleTemplates={articleTemplates} canViewMoney={canViewMoney} currency={currency} draft={draft} editingId={editingId} error={itemError} items={items} measurementUnits={measurementUnits} onCancelEdit={cancelEdit} onCommit={commitDraft} onEdit={editItem} onRemove={(id)=>setItems((rows)=>rows.filter((row)=>row.id!==id))} setDraft={setDraft} setShowDetails={setShowItemDetails} showDetails={showItemDetails}/>:null}
         {step===2?<PlanningStep attachments={attachments} canViewMoney={canViewMoney} currency={currency} fittingDate={fittingDate} instructions={instructions} itemsTotal={itemsTotal} manualTotal={manualTotal} payment={payment} paymentMethod={paymentMethod} paymentReference={paymentReference} promisedDate={promisedDate} setAttachments={setAttachments} setFittingDate={setFittingDate} setInstructions={setInstructions} setManualTotal={setManualTotal} setPayment={setPayment} setPaymentMethod={setPaymentMethod} setPaymentReference={setPaymentReference} setPromisedDate={setPromisedDate}/>:null}
         {step===3?<ReviewStep attachmentCount={attachments.length} canViewMoney={canViewMoney} clientName={clientName||'Client'} currency={currency} fittingDate={fittingDate} instructions={instructions} items={items} orderTotal={orderTotal} payment={payment} paymentMethod={paymentMethod} paymentReference={paymentReference} promisedDate={promisedDate} remaining={remaining}/>:null}
         {error?<InlineError message={error}/>:null}
+        {draftSaveError?<InlineError message="Brouillon non enregistré sur cet appareil. Vérifiez l’espace disponible."/>:null}
       </ScrollView>
       <View style={[styles.footer,{backgroundColor:theme.colors.background,borderTopColor:theme.colors.border}]}>{step>0?<Pressable disabled={submitting} onPress={previous} style={[styles.backButton,{borderColor:theme.colors.border}]}><ChevronLeft color={theme.colors.text} size={20}/><AppText variant="label">Précédent</AppText></Pressable>:<View/>}<Pressable disabled={submitting} onPress={step===steps.length-1?submit:continueWizard} style={({pressed})=>[styles.nextButton,(pressed||submitting)&&styles.pressed]}>{submitting?<ActivityIndicator color={palette.white}/>:<><AppText color={palette.white} variant="label">{step===steps.length-1?'Créer la commande':'Continuer'}</AppText>{step===steps.length-1?<Check color={palette.white} size={19}/>:<ChevronRight color={palette.white} size={20}/>}</>}</Pressable></View>
     </KeyboardAvoidingView>
@@ -138,11 +196,50 @@ export function CreateOrderScreen() {
 type ClientStepProps = {
   clientMode:'existing'|'new'; clientQuery:string; clients:ClientOption[]; loading:boolean; newClientName:string; newClientPhone:string; selectedClient:ClientOption|null;
   setClientMode:(value:'existing'|'new')=>void; setClientQuery:(value:string)=>void; setNewClientName:(value:string)=>void; setNewClientPhone:(value:string)=>void; setSelectedClient:(value:ClientOption)=>void;
+  onClearSelection:()=>void;
 };
-function ClientStep(props:ClientStepProps){const theme=useAppTheme();return <Section eyebrow="Étape 1" title="Pour qui est cette commande ?"><Segmented options={[['existing','Client existant'],['new','Nouveau client']]} value={props.clientMode} onChange={(value)=>props.setClientMode(value as 'existing'|'new')}/>{props.clientMode==='existing'?<><ClientSearch loading={props.loading} onChange={props.setClientQuery} value={props.clientQuery}/><View style={styles.clientList}>{props.clients.slice(0,8).map((client)=>{const selected=client.id===props.selectedClient?.id;return <Pressable key={client.id} onPress={()=>props.setSelectedClient(client)} style={[styles.clientRow,{borderColor:selected?theme.colors.primary:theme.colors.border,backgroundColor:selected?theme.colors.primarySoft:theme.colors.surface}]}><View style={[styles.clientAvatar,{backgroundColor:selected?theme.colors.primary:theme.colors.surfaceMuted}]}><AppText color={selected?palette.white:theme.colors.textMuted} variant="label">{initials(client.display_name)}</AppText></View><View style={styles.clientCopy}><AppText numberOfLines={1} variant="label">{client.display_name}</AppText><AppText color={theme.colors.textMuted} variant="caption">{client.phone_e164||'Sans téléphone'}</AppText></View>{selected?<Check color={theme.colors.primary} size={20}/>:<ChevronRight color={theme.colors.textSubtle} size={18}/>}</Pressable>;})}{!props.clients.length&&!props.loading?<View style={styles.noClients}><AppText color={theme.colors.textMuted} variant="caption">Aucun client trouvé</AppText></View>:null}</View></>:<View style={styles.fields}><Field icon={UserPlus} onChangeText={props.setNewClientName} placeholder="Nom complet" value={props.newClientName}/><Field keyboardType="phone-pad" onChangeText={props.setNewClientPhone} placeholder="Téléphone (optionnel)" value={props.newClientPhone}/></View>}</Section>;}
+function ClientStep(props: ClientStepProps) {
+  const theme = useAppTheme();
+  return <Section eyebrow="Étape 1" title="Pour qui est cette commande ?">
+    <Segmented options={[['existing', 'Client existant'], ['new', 'Nouveau client']]} value={props.clientMode} onChange={(value) => props.setClientMode(value as 'existing' | 'new')} />
+    {props.clientMode === 'existing' ? props.selectedClient ? (
+      <View style={[clientSelectionStyles.selected, { backgroundColor: theme.colors.primarySoft }]}>
+        <Check color={theme.colors.primary} size={21} />
+        <View style={clientSelectionStyles.copy}>
+          <AppText color={theme.colors.primary} variant="caption">Client sélectionné</AppText>
+          <AppText numberOfLines={1} variant="label">{props.selectedClient.display_name}</AppText>
+          {props.selectedClient.phone_e164 ? <AppText color={theme.colors.textMuted} variant="caption">{props.selectedClient.phone_e164}</AppText> : null}
+        </View>
+        <Pressable accessibilityLabel="Changer de client" accessibilityRole="button" onPress={props.onClearSelection} style={clientSelectionStyles.change}>
+          <Pencil color={theme.colors.primary} size={17} />
+          <AppText color={theme.colors.primary} variant="label">Changer</AppText>
+        </Pressable>
+      </View>
+    ) : <>
+      <ClientSearch loading={props.loading} onChange={props.setClientQuery} value={props.clientQuery} />
+      <View style={styles.clientList}>
+        {props.clients.slice(0, 8).map((client) => <Pressable key={client.id} onPress={() => props.setSelectedClient(client)} style={[styles.clientRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+          <View style={[styles.clientAvatar, { backgroundColor: theme.colors.surfaceMuted }]}><AppText color={theme.colors.textMuted} variant="label">{initials(client.display_name)}</AppText></View>
+          <View style={styles.clientCopy}><AppText numberOfLines={1} variant="label">{client.display_name}</AppText><AppText color={theme.colors.textMuted} variant="caption">{client.phone_e164 || 'Sans téléphone'}</AppText></View>
+          <ChevronRight color={theme.colors.textSubtle} size={18} />
+        </Pressable>)}
+        {!props.clients.length && !props.loading ? <View style={styles.noClients}><AppText color={theme.colors.textMuted} variant="caption">Aucun client trouvé</AppText></View> : null}
+      </View>
+    </> : <View style={styles.fields}>
+      <Field icon={UserPlus} onChangeText={props.setNewClientName} placeholder="Nom complet" value={props.newClientName} />
+      <Field keyboardType="phone-pad" onChangeText={props.setNewClientPhone} placeholder="Téléphone (optionnel)" value={props.newClientPhone} />
+    </View>}
+  </Section>;
+}
 
-type ArticlesStepProps={canViewMoney:boolean;currency:string;draft:DraftItem;editingId:string|null;error:string|null;items:DraftItem[];showDetails:boolean;onCancelEdit:()=>void;onCommit:()=>boolean;onEdit:(item:DraftItem)=>void;onRemove:(id:string)=>void;setDraft:React.Dispatch<React.SetStateAction<DraftItem>>;setShowDetails:(value:boolean)=>void;};
-function ArticlesStep(props:ArticlesStepProps){const theme=useAppTheme();return <View style={styles.stepStack}>{props.items.length?<Section eyebrow="Commande" title={`Articles ajoutés (${props.items.length})`}>{props.items.map((item)=><View key={item.id} style={[styles.itemRow,{borderBottomColor:theme.colors.border}]}><View style={styles.itemCopy}><AppText variant="label">{item.category}</AppText><AppText color={theme.colors.textMuted} numberOfLines={2} variant="caption">{item.description}</AppText>{props.canViewMoney?<AppText color={theme.colors.primary} variant="caption">{formatMoney(integer(item.unitPrice),props.currency)}</AppText>:null}</View><Pressable accessibilityLabel="Modifier" onPress={()=>props.onEdit(item)} style={styles.rowIcon}><Pencil color={theme.colors.primary} size={18}/></Pressable><Pressable accessibilityLabel="Supprimer" onPress={()=>props.onRemove(item.id)} style={styles.rowIcon}><Trash2 color={theme.colors.secondary} size={18}/></Pressable></View>)}</Section>:null}<Section eyebrow="Étape 2" title={props.editingId?"Modifier l'article":"Ajouter un article"}><Segmented options={[['creation','Création'],['retouche','Retouche']]} value={props.draft.workType} onChange={(value)=>props.setDraft((row)=>({...row,workType:value as 'creation'|'retouche'}))}/><Field onChangeText={(value)=>props.setDraft((row)=>({...row,category:value}))} placeholder="Article : robe, pantalon..." value={props.draft.category}/><Label text="Description du travail"/><Field multiline onChangeText={(value)=>props.setDraft((row)=>({...row,description:value}))} placeholder="Coupe, retouche, finitions..." value={props.draft.description}/><Label text="Mensurations"/><Field multiline onChangeText={(value)=>props.setDraft((row)=>({...row,measurements:value}))} placeholder={'Poitrine: 92\nTaille: 74\nLongueur: 110'} value={props.draft.measurements}/><Pressable onPress={()=>props.setShowDetails(!props.showDetails)} style={[styles.detailsToggle,{borderColor:theme.colors.border}]}><AppText color={theme.colors.primary} variant="label">Détails facultatifs</AppText>{props.showDetails?<ChevronUp color={theme.colors.primary} size={18}/>:<ChevronDown color={theme.colors.primary} size={18}/>}</Pressable>{props.showDetails?<View style={styles.optionalFields}><Label text="Pour qui ?"/><Field onChangeText={(value)=>props.setDraft((row)=>({...row,wearerName:value}))} placeholder="Optionnel" value={props.draft.wearerName}/><View style={styles.twoColumns}><View style={styles.column}><Label text="Échéance"/><Field onChangeText={(value)=>props.setDraft((row)=>({...row,dueDate:value}))} type="date" value={props.draft.dueDate}/></View>{props.canViewMoney?<View style={styles.column}><Label text={`Prix unitaire (${props.currency})`}/><Field keyboardType="number-pad" onChangeText={(value)=>props.setDraft((row)=>({...row,unitPrice:value}))} placeholder="0" value={props.draft.unitPrice}/></View>:null}</View></View>:null}{props.error?<InlineError message={props.error}/>:null}<View style={styles.editorActions}>{props.editingId?<Pressable onPress={props.onCancelEdit} style={[styles.secondaryButton,{borderColor:theme.colors.border}]}><X color={theme.colors.textMuted} size={18}/><AppText variant="label">Annuler</AppText></Pressable>:null}<Pressable onPress={props.onCommit} style={styles.smallPrimary}><Plus color={palette.white} size={19}/><AppText color={palette.white} variant="label">{props.editingId?'Mettre à jour':'Ajouter'}</AppText></Pressable></View></Section></View>;}
+const clientSelectionStyles = StyleSheet.create({
+  selected: { alignItems: 'center', borderRadius: 8, flexDirection: 'row', gap: 10, minHeight: 72, padding: 12 },
+  copy: { flex: 1, gap: 2, minWidth: 0 },
+  change: { alignItems: 'center', flexDirection: 'row', gap: 6, minHeight: 44 },
+});
+
+type ArticlesStepProps={articleTemplates:ArticleTemplate[];canViewMoney:boolean;currency:string;draft:DraftItem;editingId:string|null;error:string|null;items:DraftItem[];measurementUnits:string[];showDetails:boolean;onCancelEdit:()=>void;onCommit:()=>boolean;onEdit:(item:DraftItem)=>void;onRemove:(id:string)=>void;setDraft:React.Dispatch<React.SetStateAction<DraftItem>>;setShowDetails:(value:boolean)=>void;};
+function ArticlesStep(props:ArticlesStepProps){const theme=useAppTheme();const selectedTemplate=props.articleTemplates.find((template)=>template.name===props.draft.category);function applyTemplate(template:ArticleTemplate){props.setDraft((row)=>({...row,category:template.name,workType:template.defaultWorkType,measurements:''}));}return <View style={styles.stepStack}>{props.items.length?<Section eyebrow="Commande" title={`Articles ajoutés (${props.items.length})`}>{props.items.map((item)=><View key={item.id} style={[styles.itemRow,{borderBottomColor:theme.colors.border}]}><View style={styles.itemCopy}><AppText variant="label">{item.category}</AppText><AppText color={theme.colors.textMuted} numberOfLines={2} variant="caption">{item.description}</AppText>{props.canViewMoney?<AppText color={theme.colors.primary} variant="caption">{formatMoney(integer(item.unitPrice),props.currency)}</AppText>:null}</View><Pressable accessibilityLabel="Modifier" onPress={()=>props.onEdit(item)} style={styles.rowIcon}><Pencil color={theme.colors.primary} size={18}/></Pressable><Pressable accessibilityLabel="Supprimer" onPress={()=>props.onRemove(item.id)} style={styles.rowIcon}><Trash2 color={theme.colors.secondary} size={18}/></Pressable></View>)}</Section>:null}<Section eyebrow="Étape 2" title={props.editingId?"Modifier l'article":"Ajouter un article"}>{props.articleTemplates.length?<View style={styles.templateList}>{props.articleTemplates.slice(0,8).map((template)=><Pressable key={template.id} onPress={()=>applyTemplate(template)} style={[styles.templateChip,{backgroundColor:props.draft.category===template.name?theme.colors.primarySoft:theme.colors.surfaceMuted,borderColor:props.draft.category===template.name?theme.colors.primary:theme.colors.border}]}><AppText color={props.draft.category===template.name?theme.colors.primary:theme.colors.textMuted} variant="caption">{template.name}</AppText></Pressable>)}</View>:null}<Segmented options={[['creation','Création'],['retouche','Retouche']]} value={props.draft.workType} onChange={(value)=>props.setDraft((row)=>({...row,workType:value as 'creation'|'retouche'}))}/><Field onChangeText={(value)=>props.setDraft((row)=>({...row,category:value}))} placeholder="Article : robe, pantalon..." value={props.draft.category}/><Label text="Description du travail"/><Field multiline onChangeText={(value)=>props.setDraft((row)=>({...row,description:value}))} placeholder="Coupe, retouche, finitions..." value={props.draft.description}/><Label text="Mensurations"/><MeasurementRowsEditor onChange={(value)=>props.setDraft((row)=>({...row,measurements:value}))} templateFields={selectedTemplate?.fields ?? []} units={props.measurementUnits} value={props.draft.measurements}/><Pressable onPress={()=>props.setShowDetails(!props.showDetails)} style={[styles.detailsToggle,{borderColor:theme.colors.border}]}><AppText color={theme.colors.primary} variant="label">Détails facultatifs</AppText>{props.showDetails?<ChevronUp color={theme.colors.primary} size={18}/>:<ChevronDown color={theme.colors.primary} size={18}/>}</Pressable>{props.showDetails?<View style={styles.optionalFields}><Label text="Pour qui ?"/><Field onChangeText={(value)=>props.setDraft((row)=>({...row,wearerName:value}))} placeholder="Optionnel" value={props.draft.wearerName}/><View style={styles.twoColumns}><View style={styles.column}><Label text="Échéance"/><Field onChangeText={(value)=>props.setDraft((row)=>({...row,dueDate:value}))} type="date" value={props.draft.dueDate}/></View>{props.canViewMoney?<View style={styles.column}><Label text={`Prix unitaire (${props.currency})`}/><Field keyboardType="number-pad" onChangeText={(value)=>props.setDraft((row)=>({...row,unitPrice:value}))} placeholder="0" value={props.draft.unitPrice}/></View>:null}</View></View>:null}{props.error?<InlineError message={props.error}/>:null}<View style={styles.editorActions}>{props.editingId?<Pressable onPress={props.onCancelEdit} style={[styles.secondaryButton,{borderColor:theme.colors.border}]}><X color={theme.colors.textMuted} size={18}/><AppText variant="label">Annuler</AppText></Pressable>:null}<Pressable onPress={props.onCommit} style={styles.smallPrimary}><Plus color={palette.white} size={19}/><AppText color={palette.white} variant="label">{props.editingId?'Mettre à jour':'Ajouter'}</AppText></Pressable></View></Section></View>;}
 
 type PlanningStepProps = {
   attachments: AttachmentDraft[];
@@ -273,4 +370,4 @@ function searchable(value:string){return value.normalize('NFD').replace(/[\u0300
 function filterClients(clients:ClientOption[],query:string){const text=searchable(query.trim()),digits=query.replace(/\D/g,'');if(!text&&!digits)return clients;return clients.filter((client)=>searchable(client.display_name).includes(text)||(digits&&client.phone_e164?.replace(/\D/g,'').includes(digits)));}
 function mergeClients(current:ClientOption[],incoming:ClientOption[]){const rows=new Map(current.map((client)=>[client.id,client]));for(const client of incoming)rows.set(client.id,client);return [...rows.values()].sort((a,b)=>a.display_name.localeCompare(b.display_name,'fr',{sensitivity:'base'}));}
 
-const styles=StyleSheet.create({safeArea:{flex:1},flex:{flex:1},topBar:{alignItems:'center',flexDirection:'row',paddingHorizontal:18,paddingTop:12},iconButton:{alignItems:'center',borderRadius:8,borderWidth:1,height:44,justifyContent:'center',width:44},heading:{flex:1,marginLeft:13},progress:{flexDirection:'row',paddingHorizontal:14,paddingTop:16},progressStep:{alignItems:'center',flex:1,gap:5,minWidth:0},progressTrack:{alignItems:'center',height:26,justifyContent:'center',width:'100%'},progressLine:{height:2,left:'-50%',position:'absolute',right:'50%'},progressDot:{alignItems:'center',borderRadius:999,borderWidth:1,height:26,justifyContent:'center',width:26},content:{alignSelf:'center',flexGrow:1,gap:14,maxWidth:720,padding:18,paddingBottom:28,width:'100%'},stepStack:{gap:14},section:{borderRadius:8,borderWidth:1,padding:16},sectionBody:{gap:12,marginTop:14},segmented:{borderRadius:8,flexDirection:'row',padding:4},segment:{alignItems:'center',borderRadius:6,flex:1,justifyContent:'center',minHeight:38,paddingHorizontal:6},fields:{gap:10},fieldWrap:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',minHeight:50,paddingHorizontal:13},fieldMultiline:{alignItems:'flex-start',minHeight:92,paddingTop:4},field:{flex:1,fontFamily:'Inter_400Regular',fontSize:15,minHeight:48,paddingHorizontal:7,paddingVertical:0},multiline:{minHeight:82,paddingTop:12,textAlignVertical:'top'},clientSearch:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',height:50,paddingHorizontal:13},clientSearchInput:{flex:1,fontFamily:'Inter_400Regular',fontSize:15,height:48,marginLeft:8,paddingVertical:0},clearSearch:{alignItems:'center',height:38,justifyContent:'center',width:34},clientList:{gap:8},noClients:{alignItems:'center',minHeight:72,justifyContent:'center'},clientRow:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',minHeight:60,padding:9},clientAvatar:{alignItems:'center',borderRadius:8,height:40,justifyContent:'center',width:40},clientCopy:{flex:1,marginHorizontal:10,minWidth:0},twoColumns:{alignItems:'flex-end',flexDirection:'row',gap:10},column:{flex:1,gap:6},detailsToggle:{alignItems:'center',borderRadius:8,borderWidth:1,flex:1,flexDirection:'row',gap:6,justifyContent:'center',minHeight:50,paddingHorizontal:8},optionalFields:{gap:10},editorActions:{alignItems:'center',flexDirection:'row',gap:8,justifyContent:'flex-end'},secondaryButton:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:7,minHeight:44,paddingHorizontal:14},smallPrimary:{alignItems:'center',backgroundColor:palette.violet700,borderRadius:8,flexDirection:'row',gap:7,minHeight:44,paddingHorizontal:16},itemRow:{alignItems:'center',borderBottomWidth:1,flexDirection:'row',minHeight:74,paddingVertical:9},itemCopy:{flex:1,gap:2,minWidth:0},rowIcon:{alignItems:'center',height:42,justifyContent:'center',width:42},summaryRow:{alignItems:'flex-start',borderBottomWidth:1,flexDirection:'row',justifyContent:'space-between',minHeight:43,paddingVertical:9},summaryValue:{flex:1,marginLeft:16,textAlign:'right'},reviewItem:{alignItems:'flex-start',borderTopWidth:1,flexDirection:'row',gap:12,paddingTop:11},reviewItemCopy:{flex:1,gap:3,minWidth:0},financialSummary:{borderRadius:8,gap:2,padding:12},remainingRow:{alignItems:'center',flexDirection:'row',justifyContent:'space-between',paddingHorizontal:2,paddingTop:10},error:{borderRadius:8,borderWidth:1,padding:12},footer:{alignItems:'center',borderTopWidth:1,flexDirection:'row',justifyContent:'space-between',padding:12,paddingHorizontal:18},backButton:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:4,minHeight:48,paddingHorizontal:12},nextButton:{alignItems:'center',backgroundColor:palette.violet700,borderRadius:8,flexDirection:'row',gap:7,justifyContent:'center',minHeight:48,paddingHorizontal:18},pressed:{opacity:.72}});
+const styles=StyleSheet.create({safeArea:{flex:1},draftLoader:{marginTop:80},flex:{flex:1},topBar:{alignItems:'center',flexDirection:'row',paddingHorizontal:18,paddingTop:12},iconButton:{alignItems:'center',borderRadius:8,borderWidth:1,height:44,justifyContent:'center',width:44},heading:{flex:1,marginLeft:13},progress:{flexDirection:'row',paddingHorizontal:14,paddingTop:16},progressStep:{alignItems:'center',flex:1,gap:5,minWidth:0},progressTrack:{alignItems:'center',height:26,justifyContent:'center',width:'100%'},progressLine:{height:2,left:'-50%',position:'absolute',right:'50%'},progressDot:{alignItems:'center',borderRadius:999,borderWidth:1,height:26,justifyContent:'center',width:26},content:{alignSelf:'center',flexGrow:1,gap:14,maxWidth:720,padding:18,paddingBottom:28,width:'100%'},stepStack:{gap:14},section:{borderRadius:8,borderWidth:1,padding:16},sectionBody:{gap:12,marginTop:14},templateList:{flexDirection:'row',flexWrap:'wrap',gap:8},templateChip:{borderRadius:999,borderWidth:1,justifyContent:'center',minHeight:34,paddingHorizontal:12},segmented:{borderRadius:8,flexDirection:'row',padding:4},segment:{alignItems:'center',borderRadius:6,flex:1,justifyContent:'center',minHeight:38,paddingHorizontal:6},fields:{gap:10},fieldWrap:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',minHeight:50,paddingHorizontal:13},fieldMultiline:{alignItems:'flex-start',minHeight:92,paddingTop:4},field:{flex:1,fontFamily:'Inter_400Regular',fontSize:15,minHeight:48,paddingHorizontal:7,paddingVertical:0},multiline:{minHeight:82,paddingTop:12,textAlignVertical:'top'},clientSearch:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',height:50,paddingHorizontal:13},clientSearchInput:{flex:1,fontFamily:'Inter_400Regular',fontSize:15,height:48,marginLeft:8,paddingVertical:0},clearSearch:{alignItems:'center',height:38,justifyContent:'center',width:34},clientList:{gap:8},noClients:{alignItems:'center',minHeight:72,justifyContent:'center'},clientRow:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',minHeight:60,padding:9},clientAvatar:{alignItems:'center',borderRadius:8,height:40,justifyContent:'center',width:40},clientCopy:{flex:1,marginHorizontal:10,minWidth:0},twoColumns:{alignItems:'flex-end',flexDirection:'row',gap:10},column:{flex:1,gap:6},detailsToggle:{alignItems:'center',borderRadius:8,borderWidth:1,flex:1,flexDirection:'row',gap:6,justifyContent:'center',minHeight:50,paddingHorizontal:8},optionalFields:{gap:10},editorActions:{alignItems:'center',flexDirection:'row',gap:8,justifyContent:'flex-end'},secondaryButton:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:7,minHeight:44,paddingHorizontal:14},smallPrimary:{alignItems:'center',backgroundColor:palette.violet700,borderRadius:8,flexDirection:'row',gap:7,minHeight:44,paddingHorizontal:16},itemRow:{alignItems:'center',borderBottomWidth:1,flexDirection:'row',minHeight:74,paddingVertical:9},itemCopy:{flex:1,gap:2,minWidth:0},rowIcon:{alignItems:'center',height:42,justifyContent:'center',width:42},summaryRow:{alignItems:'flex-start',borderBottomWidth:1,flexDirection:'row',justifyContent:'space-between',minHeight:43,paddingVertical:9},summaryValue:{flex:1,marginLeft:16,textAlign:'right'},reviewItem:{alignItems:'flex-start',borderTopWidth:1,flexDirection:'row',gap:12,paddingTop:11},reviewItemCopy:{flex:1,gap:3,minWidth:0},financialSummary:{borderRadius:8,gap:2,padding:12},remainingRow:{alignItems:'center',flexDirection:'row',justifyContent:'space-between',paddingHorizontal:2,paddingTop:10},error:{borderRadius:8,borderWidth:1,padding:12},footer:{alignItems:'center',borderTopWidth:1,flexDirection:'row',justifyContent:'space-between',padding:12,paddingHorizontal:18},backButton:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:4,minHeight:48,paddingHorizontal:12},nextButton:{alignItems:'center',backgroundColor:palette.violet700,borderRadius:8,flexDirection:'row',gap:7,justifyContent:'center',minHeight:48,paddingHorizontal:18},pressed:{opacity:.72}});

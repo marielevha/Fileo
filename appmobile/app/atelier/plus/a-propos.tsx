@@ -6,11 +6,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppText } from '../../../src/components/AppText';
 import { BrandLogo } from '../../../src/components/BrandLogo';
+import { useSupportEmail } from '../../../src/support/useSupportEmail';
 import { useAppTheme } from '../../../src/theme';
 
 export default function AboutScreen() {
   const theme = useAppTheme();
   const router = useRouter();
+  const { email: supportEmail, loading: supportLoading, reload: reloadSupport } = useSupportEmail();
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
@@ -51,9 +53,9 @@ export default function AboutScreen() {
             <AppText color={theme.colors.textMuted} variant="label">Version</AppText>
             <AppText variant="label">{Constants.expoConfig?.version ?? 'Non disponible'}</AppText>
           </View>
-          <Pressable accessibilityRole="link" onPress={() => void Linking.openURL('mailto:support@fileo.app')} style={styles.contactRow}>
+          <Pressable accessibilityRole={supportEmail ? 'link' : 'button'} disabled={!supportEmail && supportLoading} onPress={() => supportEmail ? void Linking.openURL(`mailto:${supportEmail}`) : void reloadSupport()} style={styles.contactRow}>
             <Mail color={theme.colors.primary} size={19} />
-            <View style={styles.contactCopy}><AppText variant="label">Contacter Filéo</AppText><AppText color={theme.colors.textMuted} variant="caption">support@fileo.app</AppText></View>
+            <View style={styles.contactCopy}><AppText variant="label">Contacter Filéo</AppText><AppText color={theme.colors.textMuted} variant="caption">{supportEmail ?? (supportLoading ? 'Chargement...' : 'Réessayer')}</AppText></View>
             <ChevronRight color={theme.colors.textSubtle} size={18} />
           </Pressable>
         </View>

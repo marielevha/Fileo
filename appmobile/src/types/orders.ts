@@ -38,6 +38,7 @@ export type OrderSummary = {
     fitting_date: string | null;
     cancelled_at: string | null;
     created_at: string;
+    row_version: number;
   };
   items: OrderItem[];
   state: OrderState;

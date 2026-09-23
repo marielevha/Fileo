@@ -3,28 +3,33 @@ import Link from "next/link";
 import PageHero from "@/components/ui/PageHero";
 import Reveal from "@/components/ui/Reveal";
 import { listPublished } from "@/lib/repos/contents";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 import { site } from "@/lib/site";
 
-export const metadata: Metadata = {
-  title: "FAQ",
-  description: `Questions fréquentes sur ${site.name} : compte, tarifs, paiements, appareils et données.`,
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const copy = getMessages(await getLocale()).faq;
+  return { title: copy.title, description: `${copy.subtitle} ${site.name}.` };
+}
 
 export default async function FaqPage() {
-  const entries = await listPublished("faq", 100);
+  const locale = await getLocale();
+  const copy = getMessages(locale).faq;
+  const entries = await listPublished("faq", 100, locale);
 
   return (
     <>
       <PageHero
-        title="Questions fréquentes"
-        subtitle="Compte, tarifs, appareils, données : les réponses aux points soulevés le plus souvent."
+        title={copy.title}
+        subtitle={copy.subtitle}
       />
 
       <section className="bg-base-100 py-20">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           {entries.length === 0 ? (
             <p className="text-base-content/55 py-12 text-center text-sm">
-              Aucune question publiée pour le moment.
+              {locale === "fr" ? "Aucune question publiée pour le moment." : locale === "en" ? "No questions published yet." : "Motuna moko te ebimisami naino."}
             </p>
           ) : (
             <div className="space-y-3">
@@ -50,12 +55,12 @@ export default async function FaqPage() {
           )}
 
           <Reveal className="border-base-300 mt-12 rounded-2xl border border-dashed p-8 text-center">
-            <p className="font-display font-bold">Votre question n&apos;est pas là ?</p>
+            <p className="font-display font-bold">{locale === "fr" ? "Votre question n'est pas là ?" : locale === "en" ? "Still have a question?" : "Ozali na motuna mosusu?"}</p>
             <p className="text-base-content/60 mt-2 text-sm">
-              Écrivez-nous, nous répondons sous 24 h les jours ouvrés.
+              {locale === "fr" ? "Écrivez-nous, nous répondons sous 24 h les jours ouvrés." : locale === "en" ? "Write to us. We reply within one business day." : "Komela biso. Tokopesa eyano na mokolo moko ya mosala."}
             </p>
-            <Link href="/contact" className="btn btn-primary mt-5">
-              Nous contacter
+            <Link href={localePath(locale, "/contact")} className="btn btn-primary mt-5">
+              {locale === "fr" ? "Nous contacter" : locale === "en" ? "Contact us" : "Koma na biso"}
             </Link>
           </Reveal>
         </div>

@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import { ensureStorageBucket, supabaseAdmin } from "@/lib/supabase/admin";
-import { sql } from "@/lib/supabase/postgres";
+import { sql, sqlOne, withPgTransaction, type PgExecutor } from "@/lib/supabase/postgres";
 
 const MAX_FILES = 8;
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
@@ -54,11 +54,13 @@ export async function uploadOrderAttachments(input: {
   actorUserId: string;
   files: File[];
   kind?: AttachmentKind;
+  attachmentId?: string;
 }): Promise<AttachmentRow[]> {
   return uploadAttachments({
     workshopId: input.workshopId,
     actorUserId: input.actorUserId,
     files: input.files,
+    fileIds: input.attachmentId ? [input.attachmentId] : undefined,
     kind: input.kind ?? "model_photo",
     orderId: input.orderId,
     clientId: input.clientId,
@@ -72,11 +74,13 @@ export async function uploadMeasurementAttachments(input: {
   measurementId: string;
   actorUserId: string;
   files: File[];
+  attachmentId?: string;
 }): Promise<AttachmentRow[]> {
   return uploadAttachments({
     workshopId: input.workshopId,
     actorUserId: input.actorUserId,
     files: input.files,
+    fileIds: input.attachmentId ? [input.attachmentId] : undefined,
     kind: "measurement_photo",
     clientId: input.clientId,
     measurementRecordId: input.measurementId,
@@ -88,12 +92,20 @@ async function uploadAttachments(input: {
   workshopId: string;
   actorUserId: string;
   files: File[];
+  fileIds?: string[];
+  executor?: PgExecutor;
   kind: AttachmentKind;
   storagePrefix: string;
   clientId?: string | null;
   orderId?: string | null;
   measurementRecordId?: string | null;
 }): Promise<AttachmentRow[]> {
+  if (input.fileIds?.length === 1 && !input.executor) {
+    return withPgTransaction(async (client) => {
+      await sql("select pg_advisory_xact_lock(hashtext($1))", [input.fileIds![0]], client);
+      return uploadAttachments({ ...input, executor: client });
+    });
+  }
   const validFiles = input.files.filter((file) => file.size > 0);
   if (validFiles.length === 0) return [];
   if (validFiles.length > MAX_FILES) {
@@ -103,22 +115,34 @@ async function uploadAttachments(input: {
   const bucket = await ensureStorageBucket();
   const supabase = supabaseAdmin();
   const created: AttachmentRow[] = [];
+  const returned: AttachmentRow[] = [];
   const uploadedPaths: string[] = [];
   const timestamp = new Date().toISOString();
 
   try {
-    for (const file of validFiles) {
+    for (const [index, file] of validFiles.entries()) {
       const mimeType = fileMimeType(file);
       validateFile(file, mimeType);
-      const id = randomUUID();
+      const id = input.fileIds?.[index] ?? randomUUID();
       const buffer = Buffer.from(await file.arrayBuffer());
       const checksum = createHash("sha256").update(buffer).digest("hex");
       const safeName = safeFileName(file.name || "piece-jointe");
       const path = `workshops/${input.workshopId}/${input.storagePrefix}/${id}-${safeName}`;
 
+      if (input.fileIds) {
+        const existing = await sqlOne<AttachmentRow>("select * from public.attachments where id=$1", [id], input.executor);
+        if (existing) {
+          if (existing.workshop_id !== input.workshopId || existing.order_id !== (input.orderId ?? null) ||
+            existing.measurement_record_id !== (input.measurementRecordId ?? null) || existing.checksum_sha256 !== checksum ||
+            existing.deleted_at) throw new AttachmentUploadError("Identifiant de piece jointe deja utilise.");
+          returned.push(existing);
+          continue;
+        }
+      }
+
       const { error } = await supabase.storage.from(bucket).upload(path, buffer, {
         contentType: mimeType,
-        upsert: false,
+        upsert: Boolean(input.fileIds),
       });
       if (error) throw new AttachmentUploadError(error.message);
       uploadedPaths.push(path);
@@ -146,12 +170,13 @@ async function uploadAttachments(input: {
     for (const row of created) {
       await sql(`insert into public.attachments
         (id,workshop_id,order_id,order_item_id,measurement_record_id,client_id,kind,bucket,storage_path,original_filename,mime_type,size_bytes,checksum_sha256,uploaded_by,created_at)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,[
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        on conflict (id) do nothing`,[
         row.id,row.workshop_id,row.order_id,row.order_item_id,row.measurement_record_id,row.client_id,row.kind,row.bucket,row.storage_path,
         row.original_filename,row.mime_type,row.size_bytes,row.checksum_sha256,row.uploaded_by,row.created_at,
-      ]);
+      ], input.executor);
     }
-    return created;
+    return [...returned, ...created];
   } catch (error) {
     await Promise.allSettled(uploadedPaths.map((path) => supabase.storage.from(bucket).remove([path])));
     throw error;

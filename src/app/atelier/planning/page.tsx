@@ -83,7 +83,7 @@ export default async function PlanningPage({
   const members = await listPlanningMembers(workshop.id);
   const memberIds = new Set(members.map((member) => member.id));
   const safeAssignee = assignee === "unassigned" || memberIds.has(assignee) ? assignee : "all";
-  const items = await listPlanningItems(workshop.id, {
+  const { items, truncated } = await listPlanningItems(workshop.id, {
     search,
     status,
     assignee: safeAssignee,
@@ -159,6 +159,12 @@ export default async function PlanningPage({
         assignee={safeAssignee}
         quickFilter={quickFilter}
       />
+
+      {truncated ? (
+        <p role="status" className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          Seules les 500 premières tâches sont affichées. Certaines échéances peuvent manquer ; affinez les filtres ou la recherche.
+        </p>
+      ) : null}
 
       {view === "liste" ? (
         <PlanningList

@@ -181,6 +181,10 @@ export function LoginScreen() {
               </AppText>
             </Pressable>
 
+            <Pressable accessibilityRole="link" onPress={() => router.push({ pathname: '/mot-de-passe-oublie', params: { country, phone: phone.trim() } })} style={styles.forgotLink}>
+              <AppText color={theme.colors.accent} variant="label">Mot de passe oublié ?</AppText>
+            </Pressable>
+
             {error ? (
               <View accessibilityRole="alert" style={styles.errorBox}>
                 <AppText color="#FFD8E8" variant="caption">
@@ -306,6 +310,7 @@ const styles = StyleSheet.create({
     gap: 9,
     minHeight: 36,
   },
+  forgotLink: { alignSelf: 'flex-end', minHeight: 36, justifyContent: 'center' },
   checkbox: {
     alignItems: 'center',
     borderColor: 'rgba(255, 255, 255, 0.46)',

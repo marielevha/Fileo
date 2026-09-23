@@ -20,6 +20,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemeProvider, useAppTheme } from '../src/theme';
+import { startConnectivityMonitor } from '../src/sync/connectivity';
 
 void SystemUI.setBackgroundColorAsync('#1F1235');
 void SplashScreen.preventAutoHideAsync();
@@ -30,6 +31,7 @@ export default function RootLayout() {
 
 function AppRoot() {
   const theme = useAppTheme();
+  useEffect(() => startConnectivityMonitor(), []);
   const [assets, assetError] = useAssets([
     require('../assets/images/fileo-splash-vertical-hd.png'),
     require('../assets/images/onboarding-workshop.png'),

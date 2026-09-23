@@ -21,6 +21,8 @@ export async function GET() {
       me: "GET /api/mobile/v1/me",
     },
     resources: {
+      supportContact: "GET /api/mobile/v1/config/support",
+      faq: "GET /api/mobile/v1/faq?lang=fr",
       bootstrap: "GET /api/mobile/v1/bootstrap",
       clients: "GET/POST /api/mobile/v1/clients",
       client: "GET/PATCH/DELETE /api/mobile/v1/clients/{id}",

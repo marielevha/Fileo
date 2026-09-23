@@ -12,6 +12,8 @@ export function buildMobileOpenApi(origin?: string) {
     servers: [{ url: serverUrl, description: "Serveur courant" }],
     tags: [
       { name: "System", description: "Decouverte et documentation" },
+      { name: "FAQ", description: "Questions frequentes publiees" },
+      { name: "Config", description: "Configuration publique de l'application" },
       { name: "Auth", description: "Authentification mobile" },
       { name: "Bootstrap", description: "Contexte initial de l'application" },
       { name: "Clients", description: "Gestion des clients atelier" },
@@ -22,6 +24,16 @@ export function buildMobileOpenApi(origin?: string) {
       { name: "Payments", description: "Encaissements atelier" },
     ],
     paths: {
+      "/health": {
+        get: {
+          tags: ["System"],
+          summary: "Verifier la disponibilite de l'API mobile",
+          operationId: "getMobileApiHealth",
+          responses: {
+            "200": { description: "API disponible", content: json("GenericSuccess") },
+          },
+        },
+      },
       "/": {
         get: {
           tags: ["System"],
@@ -53,6 +65,30 @@ export function buildMobileOpenApi(origin?: string) {
             "400": error("Donnees invalides"),
             "401": error("Identifiants invalides"),
             "403": error("Compte ou atelier indisponible"),
+          },
+        },
+      },
+      "/faq": {
+        get: {
+          tags: ["FAQ"],
+          summary: "Lister les questions publiees dans une langue",
+          operationId: "getFaq",
+          parameters: [{ name: "lang", in: "query", required: false,
+            description: "Langue demandee, francais par defaut",
+            schema: { type: "string", enum: ["fr", "en", "lg"], default: "fr" } }],
+          responses: {
+            "200": { description: "Questions publiees", content: json("FaqResponse") },
+            "400": error("Langue non prise en charge"),
+          },
+        },
+      },
+      "/config/support": {
+        get: {
+          tags: ["Config"],
+          summary: "Lire l'adresse email du support sans connexion",
+          operationId: "getSupportContact",
+          responses: {
+            "200": { description: "Coordonnees du support", content: json("SupportContactResponse") },
           },
         },
       },
@@ -239,6 +275,21 @@ export function buildMobileOpenApi(origin?: string) {
           responses: {
             "200": { description: "Client archive", content: json("DeleteResponse") },
             "404": error("Client introuvable"),
+          },
+        },
+      },
+      "/dashboard/agenda": {
+        get: {
+          tags: ["Bootstrap"],
+          summary: "Lister les echeances d'un compteur du tableau de bord",
+          operationId: "listDashboardAgenda",
+          security: bearer(),
+          parameters: [
+            query("filter", "today, late, ready ou week"),
+            query("page", "Numero de page (10 taches par page)"),
+          ],
+          responses: {
+            "200": { description: "Page d'echeances", content: json("AgendaPageResponse") },
           },
         },
       },
@@ -563,6 +614,20 @@ export function buildMobileOpenApi(origin?: string) {
           },
         },
         GenericSuccess: successSchema({ type: "object", additionalProperties: true }),
+        FaqResponse: successSchema({
+          type: "object",
+          required: ["locale", "items"],
+          properties: {
+            locale: { type: "string", enum: ["fr", "en", "lg"] },
+            items: { type: "array", items: { type: "object", required: ["id", "question", "answer"],
+              properties: { id: { type: "string" }, question: { type: "string" }, answer: { type: "string" } } } },
+          },
+        }),
+        SupportContactResponse: successSchema({
+          type: "object",
+          required: ["supportEmail"],
+          properties: { supportEmail: { type: "string", format: "email" } },
+        }),
         IdResponse: successSchema({
           type: "object",
           required: ["id"],
@@ -864,6 +929,16 @@ export function buildMobileOpenApi(origin?: string) {
           properties: {
             items: { type: "array", items: { type: "object", additionalProperties: true } },
             members: { type: "array", items: { type: "object", additionalProperties: true } },
+            truncated: { type: "boolean" },
+          },
+        }),
+        AgendaPageResponse: successSchema({
+          type: "object",
+          properties: {
+            items: { type: "array", items: { type: "object", additionalProperties: true } },
+            page: { type: "integer" },
+            pageSize: { type: "integer" },
+            total: { type: "integer" },
           },
         }),
         PlanningItemUpdateInput: {

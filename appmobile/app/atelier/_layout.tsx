@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 
 import { getAuthSession } from '../../src/auth/session';
+import { SyncOverviewProvider } from '../../src/sync/overview';
 
 export default function AtelierLayout() {
   const router = useRouter();
@@ -19,5 +20,5 @@ export default function AtelierLayout() {
   }, [router]);
 
   if (!ready) return <View style={{ backgroundColor: '#1F1235', flex: 1 }} />;
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return <SyncOverviewProvider><Stack screenOptions={{ headerShown: false }} /></SyncOverviewProvider>;
 }

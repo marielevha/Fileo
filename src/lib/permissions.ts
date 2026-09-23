@@ -41,6 +41,7 @@ export type WorkshopAbility =
   | "expenses.write"
   | "exports.run"
   | "team.manage"
+  | "templates.manage"
   | "subscription.manage"
   | "workshop.delete";
 
@@ -78,6 +79,7 @@ export function canInWorkshop(actor: Actor, ability: WorkshopAbility): boolean {
     case "money.correct":
     case "exports.run":
     case "team.manage":
+    case "templates.manage":
     case "subscription.manage":
     case "workshop.delete":
       return isOwner;
@@ -99,6 +101,7 @@ export type AdminAbility =
   | "admin.subscriptions"
   | "admin.payments.validate"
   | "admin.contents"
+  | "admin.settings"
   | "admin.tickets"
   | "admin.audit";
 
@@ -112,6 +115,8 @@ export function canInAdmin(actor: Actor, ability: AdminAbility): boolean {
       return isAdmin || isSupport || isEditor;
     case "admin.contents":
       return isAdmin || isEditor;
+    case "admin.settings":
+      return isAdmin;
     case "admin.tickets":
       return isAdmin || isSupport;
     case "admin.workshops":

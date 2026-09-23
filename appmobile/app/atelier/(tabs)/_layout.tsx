@@ -2,9 +2,11 @@ import { Tabs } from 'expo-router';
 import { ClipboardList, Home, Menu, UsersRound, CalendarDays } from 'lucide-react-native';
 
 import { useAppTheme } from '../../../src/theme';
+import { syncBadge, useSyncOverview } from '../../../src/sync/overview';
 
 export default function AtelierTabsLayout() {
   const theme = useAppTheme();
+  const sync = useSyncOverview();
   return (
     <Tabs
       screenOptions={{
@@ -25,7 +27,7 @@ export default function AtelierTabsLayout() {
       <Tabs.Screen name="clients" options={{ title: 'Clients', tabBarIcon: ({ color, size }) => <UsersRound color={color} size={size} /> }} />
       <Tabs.Screen name="commandes" options={{ title: 'Commandes', tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} /> }} />
       <Tabs.Screen name="planning" options={{ title: 'Planning', tabBarIcon: ({ color, size }) => <CalendarDays color={color} size={size} /> }} />
-      <Tabs.Screen name="plus" options={{ title: 'Plus', tabBarIcon: ({ color, size }) => <Menu color={color} size={size} /> }} />
+      <Tabs.Screen name="plus" options={{ title: 'Plus', tabBarBadge: syncBadge(sync), tabBarIcon: ({ color, size }) => <Menu color={color} size={size} /> }} />
     </Tabs>
   );
 }

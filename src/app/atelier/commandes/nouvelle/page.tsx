@@ -8,7 +8,9 @@ import { requireWorkshop } from "@/lib/auth/guards";
 import { localePath } from "@/lib/i18n/config";
 import { getLocale } from "@/lib/i18n/request";
 import { CURRENCIES, isCurrencyCode } from "@/lib/money";
+import { listArticleTemplates } from "@/lib/repos/article-templates";
 import { listClients } from "@/lib/repos/clients";
+import { getWorkshopMeasurementUnits } from "@/lib/repos/workshops";
 
 export const metadata: Metadata = {
   title: "Nouvelle commande",
@@ -20,11 +22,15 @@ export default async function NewOrderPage() {
   const locale = await getLocale();
   const ordersHref = localePath(locale, "/atelier/commandes");
   const currency = isCurrencyCode(workshop.currency) ? workshop.currency : "XAF";
-  const clientsPage = await listClients(workshop.id, {
-    pageSize: 100,
-    sort: "name",
-    direction: "asc",
-  });
+  const [clientsPage, articleTemplates, measurementUnits] = await Promise.all([
+    listClients(workshop.id, {
+      pageSize: 100,
+      sort: "name",
+      direction: "asc",
+    }),
+    listArticleTemplates(workshop.id),
+    getWorkshopMeasurementUnits(workshop.id),
+  ]);
 
   return (
     <>
@@ -53,6 +59,8 @@ export default async function NewOrderPage() {
           today={new Date().toISOString().slice(0, 10)}
           paymentIdempotencyKey={`order:${randomUUID()}`}
           cancelHref={ordersHref}
+          articleTemplates={articleTemplates}
+          measurementUnits={measurementUnits}
         />
       </section>
     </>

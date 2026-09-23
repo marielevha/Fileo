@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     if (status !== "active" && status !== "all" && !ITEM_STATUSES.includes(status)) {
       throw new MobileApiError(400, "validation_error", "Filtre de statut invalide.");
     }
-    const [items, members] = await Promise.all([
+    const [planning, members] = await Promise.all([
       listPlanningItems(session.workshop.id, {
         search: stringParam(url, "q"),
         status,
@@ -21,6 +21,6 @@ export async function GET(request: Request) {
       }),
       listPlanningMembers(session.workshop.id),
     ]);
-    return ok({ items, members });
+    return ok({ ...planning, members });
   });
 }

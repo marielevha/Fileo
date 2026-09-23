@@ -13,6 +13,9 @@ export type AgendaItem = {
   due_date: string | null;
 };
 
+export type AgendaFilter = 'today' | 'late' | 'ready' | 'week';
+export type AgendaPage = { items: AgendaItem[]; page: number; pageSize: number; total: number };
+
 export type BootstrapResponse = {
   user: {
     id: string;
@@ -29,6 +32,7 @@ export type BootstrapResponse = {
     status: string;
     role: 'owner' | 'collaborator';
     canViewMoney: boolean;
+    measurementUnits: string[];
   };
   capabilities: {
     canViewMoney: boolean;
@@ -47,4 +51,22 @@ export type BootstrapResponse = {
       collectedThisMonth: Money;
     } | null;
   };
+  articleTemplates: ArticleTemplate[];
+};
+
+export type ArticleTemplate = {
+  id: string;
+  name: string;
+  description: string | null;
+  defaultWorkType: 'creation' | 'retouche';
+  active: boolean;
+  sortOrder: number;
+  fields: Array<{
+    key: string;
+    label: string;
+    unit: string;
+    required: boolean;
+    sortOrder: number;
+  }>;
+  rowVersion: number;
 };

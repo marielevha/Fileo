@@ -12,7 +12,7 @@ const WORKSHOP_COOKIE = "fileo_workshop";
 export type CurrentUser = { id: string; fullName: string; phone: string; platformRoles: PlatformRole[] };
 export type SessionContext = {
   user: CurrentUser; actor: Actor;
-  workshop: { id: string; name: string; currency: string; countryCode: string; timezone: string; status: string; role: WorkshopRole; canViewMoney: boolean } | null;
+  workshop: { id: string; name: string; currency: string; countryCode: string; timezone: string; status: string; role: WorkshopRole; canViewMoney: boolean; measurementUnits: string[] } | null;
 };
 
 const cookieOptions = (expires?: Date) => ({

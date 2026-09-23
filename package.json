@@ -23,6 +23,7 @@
     "check:mobile-order-close": "node scripts/check-mobile-order-close.mjs",
     "check:mobile-planning": "node scripts/check-mobile-planning.mjs",
     "check:mobile-clients": "node scripts/check-mobile-clients.mjs",
+    "check:mobile-sync": "node scripts/check-mobile-sync.mjs",
     "check:supabase-runtime": "node scripts/check-supabase-runtime.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node scripts/seed.mjs",

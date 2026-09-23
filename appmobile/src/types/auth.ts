@@ -12,7 +12,7 @@ export type LoginResponse = {
   tokenType: 'Bearer';
   expiresAt: string;
   user: { id: string; fullName: string; phone: string };
-  workshop: { id: string; name: string; currency: string; countryCode: string };
+  workshop: { id: string; name: string; currency: string; countryCode: string; measurementUnits?: string[] };
   capabilities: { canViewMoney: boolean; role: 'owner' | 'collaborator' };
 };
 

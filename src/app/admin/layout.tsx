@@ -30,7 +30,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       ? [{ href: "/admin/reglements", label: "Règlements", icon: "shield" }]
       : []),
     ...(canInAdmin(actor, "admin.contents")
-      ? [{ href: "/admin/contenus", label: "Contenus", icon: "code" }]
+      ? [{ href: "/admin/contenus", label: "FAQ", icon: "code" }]
+      : []),
+    ...(canInAdmin(actor, "admin.settings")
+      ? [{ href: "/admin/parametres", label: "Paramètres", icon: "wrench" }]
       : []),
     ...(canInAdmin(actor, "admin.tickets")
       ? [{ href: "/admin/tickets", label: "Assistance", icon: "mail" }]

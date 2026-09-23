@@ -1,18 +1,21 @@
 import Constants from 'expo-constants';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, CircleHelp, CreditCard, Info, LogOut, Moon, Store, Sun, UserRound, UsersRound } from 'lucide-react-native';
+import type { Href } from 'expo-router';
+import { ChevronRight, CircleHelp, CreditCard, Info, LogOut, Moon, RefreshCw, Settings2, Store, Sun, UserRound, UsersRound } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getBootstrap, logout } from '../../../src/api/client';
 import { AppText } from '../../../src/components/AppText';
+import { syncBadge, useSyncOverview } from '../../../src/sync/overview';
 import { useAppTheme, useThemePreference } from '../../../src/theme';
 import type { BootstrapResponse } from '../../../src/types/dashboard';
 
 export default function MoreScreen() {
   const theme = useAppTheme();
   const { preference } = useThemePreference();
+  const sync = useSyncOverview();
   const router = useRouter();
   const [data, setData] = useState<BootstrapResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +35,7 @@ export default function MoreScreen() {
   async function performLogout() {
     setLeaving(true);
     try { await logout(); }
-    catch { Alert.alert('Session locale fermée', 'La révocation côté serveur n’a pas pu être confirmée.'); }
+    catch { /* La session locale est fermée même si le serveur est indisponible. */ }
     finally { router.replace('/login'); setLeaving(false); }
   }
 
@@ -49,10 +52,12 @@ export default function MoreScreen() {
       <MenuRow icon={UserRound} label="Mon profil" onPress={()=>router.push('/atelier/plus/profil')} />
       <MenuRow icon={Store} label="Mon atelier" onPress={()=>router.push('/atelier/plus/atelier')} />
       {owner?<MenuRow icon={UsersRound} label="Équipe" onPress={()=>router.push('/atelier/plus/equipe')} />:null}
+      {owner?<MenuRow icon={Settings2} label="Paramètres" onPress={()=>router.push('/atelier/plus/parametres' as Href)} />:null}
       {owner?<MenuRow icon={CreditCard} label="Abonnement" onPress={()=>router.push('/atelier/plus/abonnement')} />:null}
     </View>
     <View style={styles.group}>
       <AppText color={theme.colors.textMuted} variant="caption">PRÉFÉRENCES</AppText>
+      <MenuRow badge={syncBadge(sync)} icon={RefreshCw} label="Synchronisation" onPress={()=>router.push('/atelier/plus/synchronisation')} />
       <MenuRow icon={preference==='dark'?Moon:Sun} label="Thème" detail={preference==='system'?'Système':preference==='dark'?'Sombre':'Clair'} onPress={()=>router.push('/atelier/plus/theme')} />
     </View>
     <View style={styles.group}>
@@ -65,9 +70,9 @@ export default function MoreScreen() {
   </ScrollView></SafeAreaView>;
 }
 
-function MenuRow({icon:Icon,label,detail,onPress}:{icon:typeof UserRound;label:string;detail?:string;onPress:()=>void}) {
+function MenuRow({icon:Icon,label,detail,badge,onPress}:{icon:typeof UserRound;label:string;detail?:string;badge?:number|'!';onPress:()=>void}) {
   const theme=useAppTheme();
-  return <Pressable accessibilityRole="button" onPress={onPress} style={[styles.row,{backgroundColor:theme.colors.surface,borderColor:theme.colors.border}]}><Icon color={theme.colors.primary} size={20}/><AppText style={styles.rowLabel} variant="label">{label}</AppText>{detail?<AppText color={theme.colors.textMuted} variant="caption">{detail}</AppText>:null}<ChevronRight color={theme.colors.textSubtle} size={18}/></Pressable>;
+  return <Pressable accessibilityLabel={badge===undefined?label:`${label}, ${badge==='!'?'attention requise':`${badge} élément${badge>1?'s':''} à suivre`}`} accessibilityRole="button" onPress={onPress} style={[styles.row,{backgroundColor:theme.colors.surface,borderColor:theme.colors.border}]}><Icon color={theme.colors.primary} size={20}/><AppText style={styles.rowLabel} variant="label">{label}</AppText>{detail?<AppText color={theme.colors.textMuted} variant="caption">{detail}</AppText>:null}{badge!==undefined?<View style={styles.syncBadge}><AppText color="#fff" style={styles.syncBadgeText}>{badge}</AppText></View>:null}<ChevronRight color={theme.colors.textSubtle} size={18}/></Pressable>;
 }
 
-const styles=StyleSheet.create({safe:{flex:1},content:{flexGrow:1,gap:20,padding:20,paddingBottom:32},identity:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:13,padding:15},avatar:{alignItems:'center',borderRadius:8,height:48,justifyContent:'center',width:48},identityText:{flex:1,minWidth:0},group:{gap:9},row:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:12,minHeight:56,paddingHorizontal:15},rowLabel:{flex:1},logout:{alignItems:'center',alignSelf:'flex-start',borderRadius:8,borderWidth:1,flexDirection:'row',gap:10,minHeight:48,paddingHorizontal:16},footer:{gap:3,marginTop:'auto',paddingTop:8},footerText:{textAlign:'center'}});
+const styles=StyleSheet.create({safe:{flex:1},content:{flexGrow:1,gap:20,padding:20,paddingBottom:32},identity:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:13,padding:15},avatar:{alignItems:'center',borderRadius:8,height:48,justifyContent:'center',width:48},identityText:{flex:1,minWidth:0},group:{gap:9},row:{alignItems:'center',borderRadius:8,borderWidth:1,flexDirection:'row',gap:12,minHeight:56,paddingHorizontal:15},rowLabel:{flex:1},syncBadge:{alignItems:'center',backgroundColor:'#FF3B30',borderRadius:10,height:20,justifyContent:'center',minWidth:20,paddingHorizontal:4},syncBadgeText:{fontFamily:'Inter_700Bold',fontSize:11,lineHeight:14},logout:{alignItems:'center',alignSelf:'flex-start',borderRadius:8,borderWidth:1,flexDirection:'row',gap:10,minHeight:48,paddingHorizontal:16},footer:{gap:3,marginTop:'auto',paddingTop:8},footerText:{textAlign:'center'}});

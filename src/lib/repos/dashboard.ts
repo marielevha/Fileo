@@ -24,6 +24,25 @@ export async function getDashboardMoney(workshopId:string,currency:CurrencyCode)
  return{outstanding:money(row?.outstanding??0,currency),collectedThisMonth:await collectedBetween(workshopId,monthStart,today(),currency)};
 }
 export type AgendaItem={item_id:string;order_id:string;reference:string;client_name:string;description:string;status:string;due_date:string|null};
+export type AgendaFilter="today"|"late"|"ready"|"week";
+export type AgendaPage={items:AgendaItem[];page:number;pageSize:number;total:number};
+const agendaConditions:Record<AgendaFilter,string>={
+ today:"coalesce(i.due_date,o.promised_date)=current_date and i.status not in('delivered','cancelled')",
+ late:"coalesce(i.due_date,o.promised_date)<current_date and i.status not in('delivered','cancelled')",
+ ready:"i.status='ready'",
+ week:"coalesce(i.due_date,o.promised_date) between current_date and current_date+7 and i.status not in('delivered','cancelled')",
+};
+export async function listAgendaPage(workshopId:string,filter:AgendaFilter,page:number,pageSize=10):Promise<AgendaPage>{
+ const where=`i.workshop_id=$1 and o.cancelled_at is null and ${agendaConditions[filter]}`;
+ const [count,items]=await Promise.all([
+  sqlOne<{total:number}>(`select count(*)::int total from public.order_items i join public.orders o on o.id=i.order_id where ${where}`,[workshopId]),
+  sql<AgendaItem>(`select i.id item_id,i.order_id,o.reference,c.display_name client_name,coalesce(i.description,'') description,
+ case i.status when 'todo' then 'a_realiser' when 'ready' then 'pret' when 'in_progress' then 'en_cours' when 'fitting' then 'a_essayer' when 'delivered' then 'remis' else 'annule' end status,
+ coalesce(i.due_date,o.promised_date)::text due_date from public.order_items i join public.orders o on o.id=i.order_id join public.clients c on c.id=o.client_id
+ where ${where} order by coalesce(i.due_date,o.promised_date) nulls last,o.reference,i.sort_order,i.id limit $2 offset $3`,[workshopId,pageSize,(page-1)*pageSize]),
+ ]);
+ return {items,page,pageSize,total:count?.total??0};
+}
 export async function getAgenda(workshopId:string,limit=25):Promise<AgendaItem[]>{
  return sql<AgendaItem>(`select i.id item_id,i.order_id,o.reference,c.display_name client_name,coalesce(i.description,'') description,
  case i.status when 'todo' then 'a_realiser' when 'ready' then 'pret' when 'in_progress' then 'en_cours' when 'fitting' then 'a_essayer' when 'delivered' then 'remis' else 'annule' end status,

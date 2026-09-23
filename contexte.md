@@ -1,13 +1,101 @@
 # Contexte de travail — Filéo
 
 > Document de reprise. À lire en premier au début d'une nouvelle session.
-> Dernière mise à jour : 21 septembre 2026.
+> Dernière mise à jour : 23 septembre 2026.
 
-**Branche active :** `feature/mobile-api`.
+**Branche active :** `feature/offline-sync`.
 
 **Architecture active : Supabase.** L'historique MongoDB ci-dessous documente
 une étape antérieure et ne doit plus être interprété comme l'architecture
 d'exécution courante.
+
+---
+
+## Mise à jour du 23 septembre 2026 - synchronisation, UX mobile et paramétrage atelier
+
+La branche `feature/offline-sync` poursuit la V1 mobile et web sur Supabase.
+L'application repose toujours sur Supabase Auth, PostgreSQL Supabase et
+Supabase Storage. MongoDB reste uniquement historique et ne doit pas être
+considéré comme une dépendance runtime.
+
+- **Synchronisation hors ligne mobile** : ajout d'une couche locale SQLite/KV
+  pour conserver les réponses utiles, les clients, commandes, planning,
+  opérations en attente, paiements et pièces jointes. Les mutations critiques
+  peuvent être mises en file d'attente quand le serveur est indisponible, puis
+  rejouées via `/api/mobile/v1/sync`. Les reçus serveur conservent l'historique
+  des altérations et évitent de perdre les opérations locales.
+- **Connectivité** : détection explicite de l'absence de serveur/réseau,
+  timeouts d'API, cache de lecture pour `bootstrap`, clients, commandes,
+  planning, agenda et FAQ. Les pages mobiles évitent désormais les longs
+  blocages quand le serveur Next est arrêté. Les messages utilisateur ont été
+  simplifiés : on évite d'exposer des détails techniques de synchronisation
+  dans les confirmations métier.
+- **Accueil mobile** : amélioration du mode clair, des états vides et erreurs,
+  de l'action “Nouvelle commande” et des filtres de tuiles. Les compteurs
+  “Aujourd'hui”, “En retard”, “Prêtes” et “Sous 7 jours” mènent à des vues
+  réellement filtrées au lieu de filtrer seulement le résumé local.
+- **Clients et commandes mobile** : états vides différenciés entre première
+  utilisation et recherche sans résultat, accès à la création ou effacement des
+  filtres selon le contexte. La création de commande conserve un brouillon,
+  masque les champs non pertinents, déplace les montants à l'étape planning et
+  garde la dernière étape comme récapitulatif. Les consignes sont facultatives.
+- **Pièces jointes** : ajout/lecture/suppression de pièces jointes pour les
+  commandes et les mensurations, avec file d'attente hors ligne côté mobile et
+  endpoints serveur dédiés. Le détail web d'une commande affiche maintenant une
+  prévisualisation des images jointes.
+- **Encaissements et clôture** : enregistrement mobile d'un encaissement, suivi
+  des paiements en attente, regroupement de la situation financière et de
+  l'historique. La fiche commande mobile propose la clôture complète après
+  vérification que les articles sont remis et que le solde est encaissé ; les
+  actions Clôturer et Annuler sont regroupées.
+- **Planning mobile** : simplification de l'écran planning avec deux filtres
+  visibles, panneau de filtres avancés et résumé des filtres actifs. Côté API,
+  la limite de planning volumineux est explicitée via pagination/limite pour
+  éviter les faux “aucun résultat”.
+- **Espace Plus mobile** : ajout des écrans profil, atelier, équipe,
+  abonnement, thème, synchronisation, FAQ et À propos. La page À propos a été
+  retravaillée pour raconter le produit, mentionner la version Expo et
+  “Propulsé par NZELOBI”. La cloche/les badges inutiles ont été reliés à de
+  vrais états de synchronisation ou retirés.
+- **FAQ et support configurables** : modélisation des FAQ en base avec versions
+  `fr`, `en` et `lg`, module d'administration web dédié, endpoint mobile avec
+  langue et fallback `fr`. L'adresse support provient désormais d'une
+  configuration unique réutilisée par le site, le mobile et la récupération de
+  mot de passe.
+- **Modèles d'articles et mensurations** : ajout de tables Supabase pour les
+  types d'articles et modèles de mensurations par atelier, module web dans
+  `/atelier/parametres`, endpoints mobiles et intégration dans la création de
+  commande et les fiches clients. Les champs libres restent possibles, mais les
+  modèles accélèrent la saisie et homogénéisent les données.
+- **Unités de mesure par atelier** : ajout de `workshops.measurement_units_json`
+  avec défaut `["cm","mm","m"]`. Les unités configurées alimentent les modèles,
+  la création de commande web, les mensurations mobile et les paramètres
+  mobiles. Dans `Plus > Paramètres`, le responsable dispose maintenant de deux
+  sous-options : `Modèles` et `Unités de mesure`.
+- **Sécurité et permissions** : les endpoints mobiles vérifient les capacités
+  côté serveur. Les réglages de modèles et d'unités sont réservés au responsable
+  de l'atelier via `templates.manage` ou le rôle owner selon l'endpoint.
+- **Correctifs web récents** : correction de `crypto.randomUUID` côté client
+  quand le site est ouvert par IP HTTP sur le réseau local ; la création de
+  commande web fonctionne avec un fallback d'identifiant client. Correction du
+  sélecteur de modèle afin que le libellé choisi ne reste pas bloqué sur
+  “Saisie libre”.
+
+**Vérifications récentes** :
+
+- `npx.cmd tsc --noEmit` à la racine.
+- `npm.cmd run typecheck` dans `appmobile`.
+- Migration Supabase `20260923143000_workshop_measurement_units.sql` appliquée
+  avec succès sur la base configurée.
+
+**Points à surveiller** :
+
+- Le module Dépenses existe dans la logique de permissions et le menu web peut
+  le prévoir, mais le produit a décidé de garder cette fonctionnalité pour plus
+  tard. Ne pas l'étendre maintenant sans nouvelle validation.
+- Le dépôt contient beaucoup de changements non encore isolés par petits
+  commits fonctionnels sur cette branche. Lors d'une reprise, vérifier `git
+  status` avant toute refactorisation.
 
 ---
 

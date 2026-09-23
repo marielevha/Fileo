@@ -34,6 +34,7 @@ export default async function AtelierLayout({ children }: { children: React.Reac
       ? [
           { href: "/atelier/equipe", label: "Équipe", icon: "users" },
           { href: "/atelier/abonnement", label: "Abonnement", icon: "sparkles" },
+          { href: "/atelier/parametres", label: "Paramètres", icon: "wrench" },
         ]
       : []),
   ].map((item) => ({ ...item, href: localePath(locale, item.href) }));

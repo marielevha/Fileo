@@ -13,7 +13,6 @@ export const site = {
     "Filéo réunit vos clients, leurs mesures, vos commandes, vos échéances et vos encaissements au même endroit. Sur ordinateur comme sur téléphone.",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://fileo.app",
   email: "contact@fileo.app",
-  supportEmail: "support@fileo.app",
   foundedYear: 2026,
 } as const;
 
