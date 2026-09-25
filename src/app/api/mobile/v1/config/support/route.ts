@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   return mobileHandler(async () => {
-    const { email } = await getSupportContact();
-    return ok({ supportEmail: email }, { headers: { "Cache-Control": "no-store" } });
+    const { email, app_version: appVersion, company_name: companyName } = await getSupportContact();
+    return ok({ supportEmail: email, appVersion, companyName }, { headers: { "Cache-Control": "no-store" } });
   });
 }

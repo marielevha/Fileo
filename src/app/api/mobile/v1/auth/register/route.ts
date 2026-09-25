@@ -5,6 +5,7 @@ import { created, mobileHandler, MobileApiError, parseJsonBody } from "@/lib/mob
 import { COUNTRIES, isCountryCode, parsePhone } from "@/lib/phone";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { authErrorCode, phoneAuthEmail, supabaseMobileAuth, writeSupabaseAudit } from "@/lib/supabase/mobile-auth";
+import { attributeWorkshopToAffiliate, findAffiliateByCode, getAffiliateProgramSettings } from "@/lib/repos/affiliates";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ type RegisterBody = {
   city?: string;
   currency?: string;
   planCode?: string;
+  affiliateCode?: string;
   termsAccepted?: boolean;
 };
 
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
     const city = String(body.city ?? "").trim();
     const currency = String(body.currency ?? "");
     const planCode = String(body.planCode ?? "").trim();
+    const affiliateCode = String(body.affiliateCode ?? "").trim();
 
     if (fullName.length < 2) throw new MobileApiError(400, "validation_error", "Merci d'indiquer votre nom.");
     if (!isCountryCode(country)) throw new MobileApiError(400, "validation_error", "Pays invalide.");
@@ -46,13 +49,17 @@ export async function POST(request: Request) {
     if (!isCurrencyCode(currency)) throw new MobileApiError(400, "validation_error", "Devise invalide.");
 
     const admin = supabaseAdmin();
-    let planQuery = admin.from("plans").select("id")
-      .eq("country_code", country).eq("status", "active")
+    let planQuery = admin.from("plans").select("id,trial_days")
+      .eq("country_code", country).eq("status", "active").eq("is_public", true)
       .order("price_amount", { ascending: true }).order("version", { ascending: false }).limit(1);
     if (planCode) planQuery = planQuery.eq("code", planCode);
     const { data: plan, error: planError } = await planQuery.maybeSingle();
     if (planError) throw planError;
     if (!plan) throw new MobileApiError(400, "plan_unavailable", "L'offre selectionnee n'est pas disponible pour ce pays.");
+    const affiliate = affiliateCode ? await findAffiliateByCode(affiliateCode) : null;
+    if (affiliateCode && !affiliate) throw new MobileApiError(400, "invalid_affiliate_code", "Code d'affiliation invalide ou inactif.");
+    const affiliateSettings = affiliate ? await getAffiliateProgramSettings() : null;
+    const trialDays = affiliate ? affiliateSettings?.affiliate_trial_days ?? Number(plan.trial_days ?? 14) : Number(plan.trial_days ?? 14);
 
     const { data: signup, error: signupError } = await supabaseMobileAuth().auth.signUp({
       phone: phone.e164,
@@ -108,7 +115,7 @@ export async function POST(request: Request) {
       if (workshopError) throw workshopError;
       workshopId = workshop.id;
 
-      const trialEnd = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+      const trialEnd = new Date(Date.now() + trialDays * 86_400_000).toISOString().slice(0, 10);
       const { error: membershipError } = await admin.from("memberships").insert({
         workshop_id: workshop.id,
         user_id: appUser.id,
@@ -126,6 +133,9 @@ export async function POST(request: Request) {
         current_period_end: trialEnd,
       });
       if (subscriptionError) throw subscriptionError;
+      if (affiliateCode) {
+        await attributeWorkshopToAffiliate({ workshopId: workshop.id, referralCode: affiliateCode, createdByUserId: appUser.id });
+      }
       await writeSupabaseAudit({
         workshopId: workshop.id,
         actorUserId: appUser.id,

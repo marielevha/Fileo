@@ -1,13 +1,13 @@
-import Constants from 'expo-constants';
 import { useFocusEffect, useRouter } from 'expo-router';
 import type { Href } from 'expo-router';
-import { ChevronRight, CircleHelp, CreditCard, Info, LogOut, Moon, RefreshCw, Settings2, Store, Sun, UserRound, UsersRound } from 'lucide-react-native';
+import { ChevronRight, CircleHelp, CreditCard, HandCoins, Info, LogOut, Moon, RefreshCw, Settings2, Store, Sun, UserRound, UsersRound } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getBootstrap, logout } from '../../../src/api/client';
 import { AppText } from '../../../src/components/AppText';
+import { usePublicConfig } from '../../../src/support/useSupportEmail';
 import { syncBadge, useSyncOverview } from '../../../src/sync/overview';
 import { useAppTheme, useThemePreference } from '../../../src/theme';
 import type { BootstrapResponse } from '../../../src/types/dashboard';
@@ -16,6 +16,7 @@ export default function MoreScreen() {
   const theme = useAppTheme();
   const { preference } = useThemePreference();
   const sync = useSyncOverview();
+  const { config } = usePublicConfig();
   const router = useRouter();
   const [data, setData] = useState<BootstrapResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export default function MoreScreen() {
   async function performLogout() {
     setLeaving(true);
     try { await logout(); }
-    catch { /* La session locale est fermée même si le serveur est indisponible. */ }
+    catch { /* La session locale est fermee meme si le serveur est indisponible. */ }
     finally { router.replace('/login'); setLeaving(false); }
   }
 
@@ -45,7 +46,7 @@ export default function MoreScreen() {
     {error?<AppText color={theme.colors.secondary}>{error}</AppText>:null}
     <View style={[styles.identity,{backgroundColor:theme.colors.surface,borderColor:theme.colors.border}]}>
       <View style={[styles.avatar,{backgroundColor:theme.colors.primarySoft}]}><UserRound color={theme.colors.primary} size={25}/></View>
-      <View style={styles.identityText}><AppText numberOfLines={1} variant="title3">{data?.user.fullName??'Mon profil'}</AppText><AppText color={theme.colors.textMuted} numberOfLines={1} variant="caption">{data?`${data.workshop.name} · ${owner?'Responsable':'Collaborateur'}`:'Chargement…'}</AppText></View>
+      <View style={styles.identityText}><AppText numberOfLines={1} variant="title3">{data?.user.fullName??'Mon profil'}</AppText><AppText color={theme.colors.textMuted} numberOfLines={1} variant="caption">{data?`${data.workshop.name} · ${owner?'Responsable':'Collaborateur'}`:'Chargement...'}</AppText></View>
     </View>
     <View style={styles.group}>
       <AppText color={theme.colors.textMuted} variant="caption">COMPTE ET ATELIER</AppText>
@@ -53,6 +54,7 @@ export default function MoreScreen() {
       <MenuRow icon={Store} label="Mon atelier" onPress={()=>router.push('/atelier/plus/atelier')} />
       {owner?<MenuRow icon={UsersRound} label="Équipe" onPress={()=>router.push('/atelier/plus/equipe')} />:null}
       {owner?<MenuRow icon={Settings2} label="Paramètres" onPress={()=>router.push('/atelier/plus/parametres' as Href)} />:null}
+      {owner?<MenuRow icon={HandCoins} label="Affiliation" onPress={()=>router.push('/atelier/plus/affiliation' as Href)} />:null}
       {owner?<MenuRow icon={CreditCard} label="Abonnement" onPress={()=>router.push('/atelier/plus/abonnement')} />:null}
     </View>
     <View style={styles.group}>
@@ -66,7 +68,7 @@ export default function MoreScreen() {
       <MenuRow icon={Info} label="À propos" onPress={()=>router.push('/atelier/plus/a-propos')} />
     </View>
     <Pressable accessibilityRole="button" disabled={leaving} onPress={confirmLogout} style={[styles.logout,{borderColor:theme.colors.border}]}>{leaving?<ActivityIndicator color={theme.colors.secondary}/>:<LogOut color={theme.colors.secondary} size={20}/>}<AppText color={theme.colors.secondary} variant="label">Se déconnecter</AppText></Pressable>
-    <View style={styles.footer}><AppText color={theme.colors.textSubtle} style={styles.footerText} variant="caption">Filéo · Version {Constants.expoConfig?.version??'non disponible'}</AppText><AppText color={theme.colors.textSubtle} style={styles.footerText} variant="caption">Propulsé par NZELOBI</AppText></View>
+    <View style={styles.footer}><AppText color={theme.colors.textSubtle} style={styles.footerText} variant="caption">Filéo · Version {config?.appVersion??'1.0.0'}</AppText><AppText color={theme.colors.textSubtle} style={styles.footerText} variant="caption">Propulsé par {config?.companyName??'Nzelobi'}</AppText></View>
   </ScrollView></SafeAreaView>;
 }
 

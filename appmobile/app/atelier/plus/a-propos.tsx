@@ -1,4 +1,3 @@
-import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, ChevronRight, Mail } from 'lucide-react-native';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -6,13 +5,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppText } from '../../../src/components/AppText';
 import { BrandLogo } from '../../../src/components/BrandLogo';
-import { useSupportEmail } from '../../../src/support/useSupportEmail';
+import { usePublicConfig } from '../../../src/support/useSupportEmail';
 import { useAppTheme } from '../../../src/theme';
 
 export default function AboutScreen() {
   const theme = useAppTheme();
   const router = useRouter();
-  const { email: supportEmail, loading: supportLoading, reload: reloadSupport } = useSupportEmail();
+  const { config, loading, reload } = usePublicConfig();
+  const supportEmail = config?.supportEmail ?? null;
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
@@ -36,13 +36,13 @@ export default function AboutScreen() {
           <View style={styles.storySection}>
             <AppText variant="title3">Garder le fil de chaque commande</AppText>
             <AppText color={theme.colors.textMuted}>
-              Une commande relie un client, des mensurations, des articles, des dates et des paiements. Filéo rassemble ces informations pour retrouver ce qui a été convenu et voir ce qu’il reste à faire.
+              Une commande relie un client, des mensurations, des articles, des dates et des paiements. Filéo rassemble ces informations pour retrouver ce qui a été convenu et voir ce qu'il reste à faire.
             </AppText>
           </View>
           <View style={styles.storySection}>
             <AppText variant="title3">Avancer ensemble</AppText>
             <AppText color={theme.colors.textMuted}>
-              Le planning rend les échéances visibles pour l’équipe. Les accès financiers restent réservés aux personnes autorisées, pendant que chacun suit le travail qui lui revient.
+              Le planning rend les échéances visibles pour l'équipe. Les accès financiers restent réservés aux personnes autorisées, pendant que chacun suit le travail qui lui revient.
             </AppText>
           </View>
         </View>
@@ -51,18 +51,18 @@ export default function AboutScreen() {
           <AppText color={theme.colors.textSubtle} style={styles.sectionLabel} variant="caption">INFORMATIONS</AppText>
           <View style={[styles.infoRow, { borderBottomColor: theme.colors.border }]}>
             <AppText color={theme.colors.textMuted} variant="label">Version</AppText>
-            <AppText variant="label">{Constants.expoConfig?.version ?? 'Non disponible'}</AppText>
+            <AppText variant="label">{config?.appVersion ?? '1.0.0'}</AppText>
           </View>
-          <Pressable accessibilityRole={supportEmail ? 'link' : 'button'} disabled={!supportEmail && supportLoading} onPress={() => supportEmail ? void Linking.openURL(`mailto:${supportEmail}`) : void reloadSupport()} style={styles.contactRow}>
+          <Pressable accessibilityRole={supportEmail ? 'link' : 'button'} disabled={!supportEmail && loading} onPress={() => supportEmail ? void Linking.openURL(`mailto:${supportEmail}`) : void reload()} style={styles.contactRow}>
             <Mail color={theme.colors.primary} size={19} />
-            <View style={styles.contactCopy}><AppText variant="label">Contacter Filéo</AppText><AppText color={theme.colors.textMuted} variant="caption">{supportEmail ?? (supportLoading ? 'Chargement...' : 'Réessayer')}</AppText></View>
+            <View style={styles.contactCopy}><AppText variant="label">Contacter Filéo</AppText><AppText color={theme.colors.textMuted} variant="caption">{supportEmail ?? (loading ? 'Chargement...' : 'Réessayer')}</AppText></View>
             <ChevronRight color={theme.colors.textSubtle} size={18} />
           </Pressable>
         </View>
 
         <View style={[styles.footer, { borderTopColor: theme.colors.border }]}>
           <AppText color={theme.colors.textSubtle} variant="caption">Propulsé par </AppText>
-          <AppText color={theme.colors.textMuted} variant="label">NZELOBI</AppText>
+          <AppText color={theme.colors.textMuted} variant="label">{config?.companyName ?? 'Nzelobi'}</AppText>
         </View>
       </ScrollView>
     </SafeAreaView>

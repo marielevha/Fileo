@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { recordAudit } from "@/lib/audit";
+import { parseLimits } from "@/lib/repos/contents";
 import { sql, sqlOne, withPgTransaction } from "@/lib/supabase/postgres";
 
 export type MeasurementTemplateField = {
@@ -102,6 +103,20 @@ export async function saveArticleTemplate(input: SaveArticleTemplateInput): Prom
         )
       : null;
     if (input.id && !existing) throw new Error("Modele introuvable.");
+    if (!input.id) {
+      const usage = await sqlOne<{ active_templates: number; limits_json: string | null }>(`
+        select count(a.id) filter(where a.deleted_at is null)::int active_templates, p.limits_json::text
+        from public.workshops w
+        left join public.subscriptions s on s.workshop_id = w.id
+        left join public.plans p on p.id = s.current_plan_id
+        left join public.workshop_article_types a on a.workshop_id = w.id and a.deleted_at is null
+        where w.id = $1
+        group by p.limits_json`, [input.workshopId], client);
+      const templateLimit = usage?.limits_json ? parseLimits(usage.limits_json).templates : null;
+      if (templateLimit !== null && (usage?.active_templates ?? 0) >= templateLimit) {
+        throw new Error(`Limite de ${templateLimit} modeles atteinte pour votre offre.`);
+      }
+    }
 
     await sql(`
       insert into public.workshop_article_types

@@ -31,7 +31,9 @@ export type Plan = {
   label: string;
   period_months: number;
   price: { amount: number; currency: string };
-  limits: { members: number | null; orders: number | null; storageMb: number | null };
+  basePrice?: { amount: number; currency: string };
+  affiliateBenefit?: { eligible: boolean; discountRateBp: number; label: string | null };
+  limits: { members: number | null; orders: number | null; storageMb: number | null; templates: number | null; notifications: boolean };
 };
 
 export type SubscriptionOverview = {
@@ -39,5 +41,6 @@ export type SubscriptionOverview = {
   currentPlan: Plan | null;
   availablePlans: Plan[];
   usage: { activeMembers: number; memberLimit: number | null };
+  affiliateBenefit?: { eligible: boolean; discountRateBp: number; label: string | null };
   payments: Array<{ id: string; amount: number; currency: string; channel: string; external_reference: string | null; status: string; declared_at: string; plan_label: string | null }>;
 };

@@ -102,6 +102,7 @@ export type AdminAbility =
   | "admin.payments.validate"
   | "admin.contents"
   | "admin.settings"
+  | "admin.affiliates"
   | "admin.tickets"
   | "admin.audit";
 
@@ -116,6 +117,7 @@ export function canInAdmin(actor: Actor, ability: AdminAbility): boolean {
     case "admin.contents":
       return isAdmin || isEditor;
     case "admin.settings":
+    case "admin.affiliates":
       return isAdmin;
     case "admin.tickets":
       return isAdmin || isSupport;

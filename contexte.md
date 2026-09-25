@@ -3,7 +3,88 @@
 > Document de reprise. À lire en premier au début d'une nouvelle session.
 > Dernière mise à jour : 23 septembre 2026.
 
-**Branche active :** `feature/offline-sync`.
+**Branche active :** `feature/affiliation`.
+
+## Mise a jour du 25 septembre 2026 - offres, administration et affiliation
+
+La branche `feature/affiliation` part de la base Supabase/mobile deja en place
+et ajoute le MVP d'affiliation ainsi qu'un meilleur parametrage back-office.
+Supabase reste l'architecture active : Auth, PostgreSQL, Storage et endpoints
+Next.js. MongoDB reste historique uniquement.
+
+- **Parcours affiliation complet** : ajout des tables Supabase
+  `affiliate_program_settings`, `affiliate_profiles`,
+  `affiliate_attributions` et `affiliate_commissions`, avec migrations,
+  repositories et actions serveur. Un utilisateur peut rejoindre le programme
+  depuis son atelier, ou creer un compte affilie sans atelier via le parcours
+  public dedie.
+- **Codes affilies** : generation automatique possible, saisie manuelle
+  normalisee en majuscules, chiffres, tiret et underscore uniquement,
+  controle d'unicite et messages explicites quand un code est deja pris ou
+  invalide. Les attributions evitent l'auto-parrainage et gardent le lien entre
+  atelier cree et affilie.
+- **Avantages du code affilie** : un atelier cree avec un code valide obtient
+  un essai prolonge et une remise sur le premier paiement. Les valeurs par
+  defaut sont 30 jours d'essai et 20% sur le premier paiement. Ces avantages
+  sont configurables dans l'administration, stockes dans
+  `affiliate_program_settings` et appliques cote serveur pour le web et le
+  mobile.
+- **Controle des paiements affilies** : le montant attendu du premier paiement
+  est recalcule cote serveur avec la remise configuree. Un montant incoherent
+  est refuse. L'avantage disparait des qu'un premier paiement plateforme est
+  valide pour l'atelier. Les informations de remise sont tracees dans le payload
+  et l'audit.
+- **Commissions affiliees** : generation des commissions au moment de la
+  validation d'un paiement plateforme. Le premier paiement et le palier apres
+  plusieurs mois d'utilisation sont configurables en pourcentage ou montant
+  fixe, avec delai de paiement. Le back-office liste les affilies, conversions,
+  commissions en attente/payees et permet de marquer une commission payee.
+- **Administration affiliation** : nouvelle page `/admin/affiliation` avec
+  formulaire restructure par sections : activation du programme, presentation
+  publique, avantages atelier, commissions et regles de versement. Le statut
+  des affilies se gere par switch direct dans la table, sans select/bouton
+  inutile.
+- **Offres et limites** : les plans deviennent pilotables depuis
+  `/admin/offres` avec datatable, modale de modification, statut actif/inactif
+  et visibilite publique modifiables par switch. Les limites gerees incluent le
+  prix, la duree d'essai, les membres, les modeles, les notifications et le
+  stockage. La home publique affiche les offres publiques, triees du plus petit
+  au plus grand.
+- **Regles d'offres retenues** : Essential = 1 membre, 5 modeles, sans
+  notifications ; Pro = 5 membres, 10 modeles, notifications ; Plus = 10
+  membres, 25 modeles, notifications. Les controles serveur utilisent ces
+  limites pour eviter de depasser les droits du plan.
+- **Parametres plateforme** : le back-office permet maintenant de configurer
+  l'email support, la version de l'application et le nom de l'entreprise
+  propulsant Fileo. Ces valeurs alimentent aussi les endpoints mobiles et les
+  pages support/a propos.
+- **Mobile** : inscription mobile compatible code affilie, types mobile mis a
+  jour pour les avantages d'abonnement, page abonnement mobile affichant prix
+  de base barre, prix reduit et pourcentage configure. L'espace Plus contient
+  aussi l'acces affiliation.
+- **Auth et destinations** : ajout d'une destination post-login selon le profil
+  afin de rediriger correctement admin, atelier et affilie autonome.
+- **Migration appliquee** : la migration
+  `20260924131500_affiliate_customer_benefits.sql` a ete appliquee sur la base
+  Supabase distante ; les valeurs actuelles sont `affiliate_trial_days = 30` et
+  `first_payment_discount_bp = 2000`.
+
+**Verifications recentes :**
+
+- `npx.cmd tsc --noEmit` a la racine.
+- `npm.cmd run typecheck` dans `appmobile`.
+- `git diff --check`.
+
+**Points a surveiller :**
+
+- Le module affiliation est un MVP. Les regles de commission sont configurables,
+  mais le paiement effectif des commissions reste manuel via le back-office.
+- La page affiliation admin a ete nettoyee en ASCII pour eviter les caracteres
+  casses observes dans ce fichier.
+- Plusieurs changements larges de la branche restent dans le meme ensemble de
+  travail. Eviter les refactorisations non demandees avant merge.
+
+---
 
 **Architecture active : Supabase.** L'historique MongoDB ci-dessous documente
 une étape antérieure et ne doit plus être interprété comme l'architecture

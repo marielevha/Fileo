@@ -29,6 +29,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     ...(canInAdmin(actor, "admin.payments.validate")
       ? [{ href: "/admin/reglements", label: "Règlements", icon: "shield" }]
       : []),
+    ...(canInAdmin(actor, "admin.affiliates")
+      ? [{ href: "/admin/affiliation", label: "Affiliation", icon: "users" }]
+      : []),
     ...(canInAdmin(actor, "admin.contents")
       ? [{ href: "/admin/contenus", label: "FAQ", icon: "code" }]
       : []),

@@ -26,6 +26,7 @@ export type RegisterRequest = {
   workshopName: string;
   city?: string;
   currency: 'XAF' | 'CDF';
+  affiliateCode?: string;
   termsAccepted: true;
 };
 

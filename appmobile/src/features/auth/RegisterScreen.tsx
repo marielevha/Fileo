@@ -32,6 +32,7 @@ export function RegisterScreen() {
   const [fullName, setFullName] = useState('');
   const [workshopName, setWorkshopName] = useState('');
   const [city, setCity] = useState('');
+  const [affiliateCode, setAffiliateCode] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -63,6 +64,7 @@ export function RegisterScreen() {
         fullName: fullName.trim(),
         workshopName: workshopName.trim(),
         city: city.trim() || undefined,
+        affiliateCode: affiliateCode.trim() || undefined,
         country,
         currency: selectedCountry.currency,
         phone,
@@ -123,6 +125,7 @@ export function RegisterScreen() {
             <Field label="Nom complet" onChangeText={setFullName} placeholder="Votre nom" value={fullName} />
             <Field label="Nom de l’atelier" onChangeText={setWorkshopName} placeholder="Atelier Filéo" value={workshopName} />
             <Field label="Ville (facultatif)" onChangeText={setCity} placeholder="Brazzaville" value={city} />
+            <Field autoCapitalize="characters" label="Code d'affiliation (facultatif)" onChangeText={setAffiliateCode} placeholder="FILEO-BZV" value={affiliateCode} />
 
             <View style={styles.fieldGroup}>
               <AppText color="rgba(255, 255, 255, 0.78)" variant="label">Numéro de téléphone</AppText>
@@ -205,16 +208,16 @@ export function RegisterScreen() {
   );
 }
 
-type FieldProps = { label: string; value: string; placeholder: string; onChangeText: (value: string) => void };
+type FieldProps = { label: string; value: string; placeholder: string; onChangeText: (value: string) => void; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters' };
 
-function Field({ label, value, placeholder, onChangeText }: FieldProps) {
+function Field({ label, value, placeholder, onChangeText, autoCapitalize = 'words' }: FieldProps) {
   const theme = useAppTheme();
   return (
     <View style={styles.fieldGroup}>
       <AppText color="rgba(255, 255, 255, 0.78)" variant="label">{label}</AppText>
       <TextInput
         accessibilityLabel={label}
-        autoCapitalize="words"
+        autoCapitalize={autoCapitalize}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor="rgba(255, 255, 255, 0.32)"

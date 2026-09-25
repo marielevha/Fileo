@@ -625,8 +625,12 @@ export function buildMobileOpenApi(origin?: string) {
         }),
         SupportContactResponse: successSchema({
           type: "object",
-          required: ["supportEmail"],
-          properties: { supportEmail: { type: "string", format: "email" } },
+          required: ["supportEmail", "appVersion", "companyName"],
+          properties: {
+            supportEmail: { type: "string", format: "email" },
+            appVersion: { type: "string" },
+            companyName: { type: "string" },
+          },
         }),
         IdResponse: successSchema({
           type: "object",
@@ -684,6 +688,7 @@ export function buildMobileOpenApi(origin?: string) {
             city: { type: "string", nullable: true, example: "Brazzaville" },
             currency: { type: "string", enum: ["XAF", "CDF", "USD"], example: "XAF" },
             planCode: { type: "string", nullable: true },
+            affiliateCode: { type: "string", nullable: true, example: "FILEO-BZV" },
             termsAccepted: { type: "boolean", example: true },
           },
         },

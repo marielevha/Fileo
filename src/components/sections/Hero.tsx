@@ -7,6 +7,11 @@ import { localePath } from "@/lib/i18n/config";
 export default async function Hero() {
   const locale = await getLocale();
   const copy = getMessages(locale).home;
+  const affiliateCta = {
+    fr: "Devenir affilie Fileo",
+    en: "Become a Fileo affiliate",
+    lg: "Koma affilie Fileo",
+  }[locale];
   return (
     <section className="relative flex min-h-[92vh] items-center overflow-hidden pt-28 pb-20">
       <div aria-hidden="true" className="absolute inset-0 -z-10">
@@ -59,7 +64,10 @@ export default async function Hero() {
           </div>
 
           <p className="text-base-content/50 mt-4 text-sm">
-            {copy.trial}
+            {copy.trial}{" "}
+            <Link href={localePath(locale, "/affiliation")} className="link link-primary font-medium">
+              {affiliateCta}
+            </Link>
           </p>
         </div>
 

@@ -99,6 +99,23 @@ export default function SignUpForm({ planCode }: { planCode?: string }) {
         </div>
       </div>
 
+      <div>
+        <label className="label-text mb-1.5 block font-medium" htmlFor="affiliateCode">
+          Code d'affiliation
+        </label>
+        <input
+          id="affiliateCode"
+          name="affiliateCode"
+          type="text"
+          autoCapitalize="characters"
+          placeholder="Ex. FILEO-BZV"
+          className="input input-bordered w-full uppercase"
+        />
+        <p className="text-base-content/50 mt-1.5 text-xs">
+          Facultatif. Renseignez-le si quelqu'un vous a recommandé Filéo.
+        </p>
+      </div>
+
       {/* §7.2: changing the currency after the first transaction is not a
           silent conversion, so the choice is flagged as durable up front. */}
       <p className="alert alert-info text-sm">

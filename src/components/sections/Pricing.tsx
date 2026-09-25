@@ -30,7 +30,7 @@ export default async function Pricing() {
             </p>
           </Reveal>
         ) : (
-          <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
+          <div className="mx-auto grid max-w-7xl gap-6 md:grid-cols-2 xl:grid-cols-3">
             {plans.map((plan, index) => {
               const limits = parseLimits(plan.limits_json);
               const price = money(plan.price_amount, plan.currency as CurrencyCode);
@@ -78,6 +78,14 @@ export default async function Pricing() {
                         <dd className="font-medium">{limits.members ?? copy.pending}</dd>
                       </div>
                       <div className="flex justify-between">
+                        <dt className="text-base-content/55">{copy.templates}</dt>
+                        <dd className="font-medium">{limits.templates ?? copy.pending}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-base-content/55">{copy.notifications}</dt>
+                        <dd className="font-medium">{limits.notifications ? copy.included : copy.notIncluded}</dd>
+                      </div>
+                      <div className="flex justify-between">
                         <dt className="text-base-content/55">{copy.storage}</dt>
                         <dd className="font-medium">
                           {limits.storageMb ? `${limits.storageMb} Mo` : copy.pending}
@@ -89,7 +97,7 @@ export default async function Pricing() {
                       href={`${localePath(locale, "/inscription")}?offre=${encodeURIComponent(plan.code)}`}
                       className="btn btn-primary mt-7 w-full"
                     >
-                      {copy.trial}
+                      {copy.trial.replace("14", String(plan.trial_days))}
                     </Link>
                   </article>
                 </Reveal>

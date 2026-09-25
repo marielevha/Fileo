@@ -105,6 +105,8 @@ function plan(key, row) {
   push("plans", {
     id,
     period_months: 1,
+    trial_days: 14,
+    is_public: true,
     version: 1,
     effective_from: day(-30),
     archived_at: null,
@@ -322,7 +324,8 @@ plan("essentiel", {
   country_code: "CG",
   currency: "XAF",
   price_amount: 2500,
-  limits_json: JSON.stringify({ members: 5, storageMb: 2000, orders: null }),
+  max_active_members: 1,
+  limits_json: JSON.stringify({ members: 1, storageMb: 2000, orders: null, templates: 5, notifications: false }),
 });
 plan("pro", {
   code: "pro",
@@ -330,15 +333,17 @@ plan("pro", {
   country_code: "CG",
   currency: "XAF",
   price_amount: 5000,
-  limits_json: JSON.stringify({ members: 10, storageMb: 5000, orders: null }),
+  max_active_members: 5,
+  limits_json: JSON.stringify({ members: 5, storageMb: 5000, orders: null, templates: 10, notifications: true }),
 });
 plan("atelier_plus", {
   code: "atelier_plus",
-  label: "Fileo Atelier Plus",
+  label: "Fileo Plus",
   country_code: "CG",
   currency: "XAF",
   price_amount: 8500,
-  limits_json: JSON.stringify({ members: 25, storageMb: 12000, orders: null }),
+  max_active_members: 10,
+  limits_json: JSON.stringify({ members: 10, storageMb: 12000, orders: null, templates: 25, notifications: true }),
 });
 
 subscription("elegance", {

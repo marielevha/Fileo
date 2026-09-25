@@ -171,6 +171,9 @@ function PlanPaymentSection({
     label: plan.label,
     amount: toDecimalString(plan.price),
     priceLabel: formatMoney(plan.price),
+    basePriceLabel: formatMoney(plan.basePrice),
+    affiliateDiscount: plan.affiliateBenefit.eligible,
+    affiliateDiscountLabel: discountLabel(plan.affiliateBenefit.discountRateBp),
     periodLabel: `${plan.period_months} mois`,
     membersLabel: `${plan.limits.members ?? "Illimité"} membres`,
     currency: plan.currency,
@@ -203,8 +206,10 @@ function PlanPaymentSection({
                   </td>
                   <td className="py-4 text-sm text-base-content/65">{plan.periodLabel}</td>
                   <td className="py-4 text-sm text-base-content/65">{plan.membersLabel}</td>
-                  <td className="py-4 text-right font-display text-xl font-extrabold text-primary">
-                    {plan.priceLabel}
+                  <td className="py-4 text-right">
+                    {plan.affiliateDiscount ? <span className="block text-xs text-base-content/45 line-through">{plan.basePriceLabel}</span> : null}
+                    <span className="font-display text-xl font-extrabold text-primary">{plan.priceLabel}</span>
+                    {plan.affiliateDiscount ? <span className="badge badge-success badge-xs mt-1">{plan.affiliateDiscountLabel} affilié</span> : null}
                   </td>
                   <td className="py-4 text-right">
                     {plan.current ? (
@@ -225,6 +230,11 @@ function PlanPaymentSection({
         <p className="mt-1 text-sm text-base-content/60">
           Sélectionnez l&apos;offre payée, puis renseignez les informations de transaction.
         </p>
+        {plans.some((plan) => plan.affiliateBenefit.eligible) ? (
+          <p className="alert alert-success mt-4 py-3 text-sm">
+            Avantage code affilié appliqué : {discountLabel(plans.find((plan) => plan.affiliateBenefit.eligible)?.affiliateBenefit.discountRateBp ?? 0)} sur ce premier paiement.
+          </p>
+        ) : null}
         <div className="mt-5">
           <DeclarePaymentForm
             plans={paymentPlans}
@@ -236,6 +246,10 @@ function PlanPaymentSection({
       </div>
     </section>
   );
+}
+
+function discountLabel(rateBp: number) {
+  return `-${(rateBp / 100).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}%`;
 }
 
 function PaymentsHistory({

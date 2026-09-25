@@ -12,15 +12,23 @@ export async function saveSupportContact(
 ): Promise<SupportContactFormState> {
   const session = await requireAdmin("admin.settings");
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const appVersion = String(formData.get("appVersion") ?? "").trim();
+  const companyName = String(formData.get("companyName") ?? "").trim();
   const rowVersion = Number(formData.get("rowVersion"));
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: "Saisissez une adresse email valide." };
+  }
+  if (appVersion.length < 1 || appVersion.length > 40) {
+    return { error: "Saisissez une version valide." };
+  }
+  if (companyName.length < 1 || companyName.length > 80) {
+    return { error: "Saisissez le nom de l'entreprise." };
   }
   if (!Number.isSafeInteger(rowVersion) || rowVersion < 1) {
     return { error: "Version invalide. Rechargez la page." };
   }
   try {
-    await updateSupportContact({ email, rowVersion, actorUserId: session.user.id });
+    await updateSupportContact({ email, appVersion, companyName, rowVersion, actorUserId: session.user.id });
     revalidatePath("/", "layout");
     return { success: true };
   } catch (error) {

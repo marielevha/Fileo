@@ -24,6 +24,9 @@ export type PaymentPlanOption = {
   label: string;
   amount: string;
   priceLabel: string;
+  basePriceLabel?: string;
+  affiliateDiscount?: boolean;
+  affiliateDiscountLabel?: string;
   periodLabel: string;
   membersLabel: string;
   currency: string;
@@ -244,7 +247,7 @@ function PlanAndAmountFields({
         >
           {plans.map((plan) => (
             <option key={plan.id} value={plan.id}>
-              {plan.label} - {plan.priceLabel}
+              {plan.label} - {plan.priceLabel}{plan.affiliateDiscount ? ` (${plan.affiliateDiscountLabel ?? "avantage affilié"})` : ""}
             </option>
           ))}
         </select>
@@ -252,6 +255,11 @@ function PlanAndAmountFields({
 
       <label className="block">
         <span className="label-text mb-2.5 block text-xs font-medium">Montant payé</span>
+        {selectedPlan?.affiliateDiscount ? (
+          <span className="mb-2 block text-xs text-success">
+            Avantage affilié appliqué : {selectedPlan.basePriceLabel} → {selectedPlan.priceLabel}
+          </span>
+        ) : null}
         <input
           name="amountDisplay"
           type="text"

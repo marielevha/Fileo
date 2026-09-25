@@ -13,12 +13,14 @@ export default function Navbar({ signedIn = false, adminAccess = false, locale }
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const copy = getMessages(locale);
+  const affiliateLabel = { fr: "Affiliation", en: "Affiliate", lg: "Affiliation" }[locale];
   const navLinks = [
     { href: "/#fonctionnalites", label: copy.nav.features },
     { href: "/#tarifs", label: copy.nav.pricing },
     { href: "/#prise-en-main", label: copy.nav.gettingStarted },
     { href: "/#faq", label: copy.nav.faq },
     { href: "/nouveautes", label: copy.nav.news },
+    { href: "/affiliation", label: affiliateLabel },
   ];
 
   useEffect(() => {

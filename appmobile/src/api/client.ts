@@ -124,7 +124,7 @@ async function refreshAccessToken(): Promise<string> {
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}, options: { offlineFallback?: boolean } = {}): Promise<T> {
   const session = await getAuthSession();
-  const cacheable = (!init.method || init.method === 'GET') && /^\/(bootstrap|clients|orders|planning|dashboard\/agenda|faq)(\/|\?|$)/.test(path);
+  const cacheable = (!init.method || init.method === 'GET') && /^\/(bootstrap|clients|orders|planning|dashboard\/agenda|faq|more\/affiliation)(\/|\?|$)/.test(path);
   let response: Response;
   try {
     response = await fetchApi(path, init, session?.token);
@@ -245,6 +245,7 @@ async function performSyncCycle() {
     if (page >= result.pageCount) break;
   }
   await cachePlanning(await apiRequest<PlanningResponse>('/planning?status=all&assignee=all', {}, { offlineFallback: false }));
+  await apiRequest<AffiliateOverview>('/more/affiliation', {}, { offlineFallback: false }).catch(() => undefined);
   lastClientHydration = Date.now();
   lastHydratedScope = currentScope;
 }
@@ -348,6 +349,36 @@ export function deleteTemplate(id: string) {
   return apiRequest<{ deleted: true }>(`/more/templates/${id}`, { method: 'DELETE' });
 }
 
+export type AffiliateOverview = {
+  profile: null | { id: string; code: string; display_name: string; status: string; created_at: string };
+  attributions: Array<{ id: string; workshop_id: string; workshop_name?: string; attributed_at: string }>;
+  commissions: Array<{ id: string; milestone: 'first_payment' | 'sixth_month'; amount: number; currency: string; status: 'pending' | 'paid' | 'cancelled'; due_at: string; paid_at: string | null; workshop_name?: string }>;
+  totals: Array<{ currency: string; pending: number; paid: number }>;
+  settings: {
+    enabled: boolean;
+    public_title: string;
+    public_description: string;
+    sixth_month_threshold_months: number;
+  };
+};
+
+export async function getAffiliateOverview(onCached?: (cached: AffiliateOverview) => void) {
+  if (onCached) {
+    const cached = await cachedResponse<AffiliateOverview>('/more/affiliation').catch(() => null);
+    if (cached) onCached(cached);
+  }
+  return apiRequest<AffiliateOverview>('/more/affiliation');
+}
+
+export async function joinAffiliateProgram(input: { code?: string; autoGenerate?: boolean } = {}) {
+  if (isApiKnownOffline()) {
+    throw new ApiError('Connexion requise pour creer le code.', 'offline_not_allowed', 0);
+  }
+  const result = await apiRequest<{ profile: NonNullable<AffiliateOverview['profile']>; overview: AffiliateOverview }>('/more/affiliation', { method: 'POST', body: JSON.stringify(input) });
+  await saveResponse('/more/affiliation', result.overview).catch(() => undefined);
+  return result;
+}
+
 export function getTeam(page = 1) {
   return apiRequest<TeamPage>(`/more/team?page=${page}`);
 }
@@ -370,19 +401,53 @@ export function getFaq(lang: 'fr' | 'en' | 'lg' = 'fr') {
   return apiRequest<FaqResponse>(`/faq?lang=${lang}`);
 }
 
-const SUPPORT_EMAIL_CACHE_KEY = 'fileo.public.support-email';
+const PUBLIC_CONFIG_CACHE_KEY = 'fileo.public.config';
 
-export async function getSupportEmail(onCached?: (email: string) => void): Promise<string> {
-  const cached = await Storage.getItem(SUPPORT_EMAIL_CACHE_KEY).catch(() => null);
+export type PublicConfig = {
+  supportEmail: string;
+  appVersion: string;
+  companyName: string;
+};
+
+const DEFAULT_PUBLIC_CONFIG: PublicConfig = {
+  supportEmail: 'support@fileo.app',
+  appVersion: '1.0.0',
+  companyName: 'Nzelobi',
+};
+
+function normalisePublicConfig(value: Partial<PublicConfig> | null | undefined): PublicConfig {
+  return {
+    supportEmail: value?.supportEmail?.trim() || DEFAULT_PUBLIC_CONFIG.supportEmail,
+    appVersion: value?.appVersion?.trim() || DEFAULT_PUBLIC_CONFIG.appVersion,
+    companyName: value?.companyName?.trim() || DEFAULT_PUBLIC_CONFIG.companyName,
+  };
+}
+
+async function readCachedPublicConfig(): Promise<PublicConfig | null> {
+  const cached = await Storage.getItem(PUBLIC_CONFIG_CACHE_KEY).catch(() => null);
+  if (!cached) return null;
+  try {
+    return normalisePublicConfig(JSON.parse(cached) as Partial<PublicConfig>);
+  } catch {
+    return null;
+  }
+}
+
+export async function getPublicConfig(onCached?: (config: PublicConfig) => void): Promise<PublicConfig> {
+  const cached = await readCachedPublicConfig();
   if (cached) onCached?.(cached);
   try {
-    const { supportEmail } = await apiRequest<{ supportEmail: string }>('/config/support');
-    await Storage.setItem(SUPPORT_EMAIL_CACHE_KEY, supportEmail).catch(() => undefined);
-    return supportEmail;
+    const config = normalisePublicConfig(await apiRequest<PublicConfig>('/config/support'));
+    await Storage.setItem(PUBLIC_CONFIG_CACHE_KEY, JSON.stringify(config)).catch(() => undefined);
+    return config;
   } catch (error) {
     if (cached) return cached;
-    throw error;
+    return DEFAULT_PUBLIC_CONFIG;
   }
+}
+
+export async function getSupportEmail(onCached?: (email: string) => void): Promise<string> {
+  return (await getPublicConfig((config) => onCached?.(config.supportEmail))).supportEmail;
 }
 
 export function declareSubscriptionPayment(input: { planId: string; channel: string; reference: string }) {
