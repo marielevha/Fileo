@@ -8,6 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 const ACCESS_COOKIE = "fileo_access_token";
 const REFRESH_COOKIE = "fileo_refresh_token";
 const WORKSHOP_COOKIE = "fileo_workshop";
+const WEB_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export type CurrentUser = { id: string; fullName: string; phone: string; platformRoles: PlatformRole[] };
 export type SessionContext = {
@@ -21,8 +22,10 @@ const cookieOptions = (expires?: Date) => ({
 
 export async function createSession(accessToken: string, refreshToken: string, expiresAt?: number): Promise<void> {
   const store = await cookies();
-  store.set(ACCESS_COOKIE, accessToken, cookieOptions(expiresAt ? new Date(expiresAt * 1000) : undefined));
-  store.set(REFRESH_COOKIE, refreshToken, cookieOptions(new Date(Date.now() + 30 * 86_400_000)));
+  const sessionExpiresAt = new Date(Date.now() + WEB_SESSION_MAX_AGE_MS);
+  const accessExpiresAt = expiresAt ? new Date(Math.min(expiresAt * 1000, sessionExpiresAt.getTime())) : sessionExpiresAt;
+  store.set(ACCESS_COOKIE, accessToken, cookieOptions(accessExpiresAt));
+  store.set(REFRESH_COOKIE, refreshToken, cookieOptions(sessionExpiresAt));
 }
 
 export async function createSessionToken(): Promise<never> {
@@ -41,7 +44,7 @@ export async function destroySession(): Promise<void> {
 }
 
 export async function setSessionWorkshop(workshopId: string): Promise<void> {
-  (await cookies()).set(WORKSHOP_COOKIE, workshopId, cookieOptions(new Date(Date.now() + 30 * 86_400_000)));
+  (await cookies()).set(WORKSHOP_COOKIE, workshopId, cookieOptions(new Date(Date.now() + WEB_SESSION_MAX_AGE_MS)));
 }
 
 export async function getSessionByToken(token: string): Promise<SessionContext | null> {
@@ -58,7 +61,14 @@ export async function getSession(): Promise<SessionContext | null> {
   const refreshToken = store.get(REFRESH_COOKIE)?.value;
   if (!refreshToken) return null;
   const { data, error } = await supabaseMobileAuth().auth.refreshSession({ refresh_token: refreshToken });
-  if (error || !data.session) return null;
+  if (error || !data.session) {
+    try {
+      store.delete(ACCESS_COOKIE); store.delete(REFRESH_COOKIE); store.delete(WORKSHOP_COOKIE);
+    } catch {
+      // Server Components can read cookies but only actions and route handlers may update them.
+    }
+    return null;
+  }
   accessToken = data.session.access_token;
   try {
     await createSession(accessToken, data.session.refresh_token, data.session.expires_at);
