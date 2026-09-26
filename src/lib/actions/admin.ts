@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { rejectPlatformPayment, validatePlatformPayment } from "@/lib/repos/admin";
 
@@ -26,18 +25,18 @@ export async function reviewPlatformPayment(
 
   try {
     if (decision === "validate") {
-      const { alreadyValidated } = validatePlatformPayment({
+      const { alreadyValidated, scheduledForLater } = await validatePlatformPayment({
         paymentId,
         reviewerUserId: session.user.id,
         note: note || null,
       });
 
-      revalidatePath("/admin/reglements");
-
       // REC-17: validating the same reference twice extends the period once.
       return {
         message: alreadyValidated
           ? "Ce règlement était déjà validé. Aucune prolongation supplémentaire n'a été appliquée."
+          : scheduledForLater
+            ? "Règlement validé. L'offre sera appliquée après les échéances déjà actives."
           : "Règlement validé et abonnement prolongé.",
       };
     }
@@ -45,8 +44,7 @@ export async function reviewPlatformPayment(
     if (decision === "reject") {
       if (!note) return { error: "Un motif est obligatoire pour rejeter un règlement." };
 
-      rejectPlatformPayment({ paymentId, reviewerUserId: session.user.id, note });
-      revalidatePath("/admin/reglements");
+      await rejectPlatformPayment({ paymentId, reviewerUserId: session.user.id, note });
 
       return { message: "Règlement rejeté." };
     }

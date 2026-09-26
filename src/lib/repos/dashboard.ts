@@ -1,140 +1,51 @@
 import "server-only";
-
-import { query, queryOne } from "@/lib/db";
-import { money, type CurrencyCode, type Money } from "@/lib/money";
+import { money,type CurrencyCode,type Money } from "@/lib/money";
+import { sql,sqlOne } from "@/lib/supabase/postgres";
 import { collectedBetween } from "./payments";
-
-/**
- * Workshop dashboard — cahier des charges §8.1.
- *
- * Every indicator opens a list, so each figure is paired with the filter that
- * reproduces it. Totals exclude cancelled items and always carry a currency.
- */
-
-export type DashboardCounts = {
-  dueToday: number;
-  dueWithinSevenDays: number;
-  late: number;
-  readyNotDelivered: number;
+export type DashboardCounts={dueToday:number;dueWithinSevenDays:number;late:number;readyNotDelivered:number};
+export type DashboardMoney={outstanding:Money;collectedThisMonth:Money};
+const today=()=>new Date().toISOString().slice(0,10);
+export async function getDashboardCounts(workshopId:string):Promise<DashboardCounts>{
+ const row=await sqlOne<DashboardCounts>(`select
+ count(*) filter(where coalesce(i.due_date,o.promised_date)=current_date and i.status not in('delivered','cancelled'))::int as "dueToday",
+ count(*) filter(where coalesce(i.due_date,o.promised_date) between current_date and current_date+7 and i.status not in('delivered','cancelled'))::int as "dueWithinSevenDays",
+ count(*) filter(where coalesce(i.due_date,o.promised_date)<current_date and i.status not in('delivered','cancelled'))::int as late,
+ count(*) filter(where i.status='ready')::int as "readyNotDelivered"
+ from public.order_items i join public.orders o on o.id=i.order_id where i.workshop_id=$1 and o.cancelled_at is null`,[workshopId]);
+ return row??{dueToday:0,dueWithinSevenDays:0,late:0,readyNotDelivered:0};
+}
+export async function getDashboardMoney(workshopId:string,currency:CurrencyCode):Promise<DashboardMoney>{
+ const row=await sqlOne<{outstanding:number}>(`with totals as(
+ select o.id,greatest(coalesce(sum(i.unit_price_amount*i.quantity) filter(where i.status<>'cancelled'),0)-o.discount_amount,0) total
+ from public.orders o left join public.order_items i on i.order_id=o.id where o.workshop_id=$1 and o.cancelled_at is null group by o.id),
+ paid as(select order_id,coalesce(sum(case when kind='payment' then amount when kind='refund' then -amount else 0 end) filter(where status='confirmed'),0) net from public.financial_movements where workshop_id=$1 group by order_id)
+ select coalesce(sum(greatest(t.total-coalesce(p.net,0),0)),0)::int outstanding from totals t left join paid p on p.order_id=t.id`,[workshopId]);
+ const monthStart=`${today().slice(0,7)}-01`;
+ return{outstanding:money(row?.outstanding??0,currency),collectedThisMonth:await collectedBetween(workshopId,monthStart,today(),currency)};
+}
+export type AgendaItem={item_id:string;order_id:string;reference:string;client_name:string;description:string;status:string;due_date:string|null};
+export type AgendaFilter="today"|"late"|"ready"|"week";
+export type AgendaPage={items:AgendaItem[];page:number;pageSize:number;total:number};
+const agendaConditions:Record<AgendaFilter,string>={
+ today:"coalesce(i.due_date,o.promised_date)=current_date and i.status not in('delivered','cancelled')",
+ late:"coalesce(i.due_date,o.promised_date)<current_date and i.status not in('delivered','cancelled')",
+ ready:"i.status='ready'",
+ week:"coalesce(i.due_date,o.promised_date) between current_date and current_date+7 and i.status not in('delivered','cancelled')",
 };
-
-export type DashboardMoney = {
-  outstanding: Money;
-  collectedThisMonth: Money;
-};
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
+export async function listAgendaPage(workshopId:string,filter:AgendaFilter,page:number,pageSize=10):Promise<AgendaPage>{
+ const where=`i.workshop_id=$1 and o.cancelled_at is null and ${agendaConditions[filter]}`;
+ const [count,items]=await Promise.all([
+  sqlOne<{total:number}>(`select count(*)::int total from public.order_items i join public.orders o on o.id=i.order_id where ${where}`,[workshopId]),
+  sql<AgendaItem>(`select i.id item_id,i.order_id,o.reference,c.display_name client_name,coalesce(i.description,'') description,
+ case i.status when 'todo' then 'a_realiser' when 'ready' then 'pret' when 'in_progress' then 'en_cours' when 'fitting' then 'a_essayer' when 'delivered' then 'remis' else 'annule' end status,
+ coalesce(i.due_date,o.promised_date)::text due_date from public.order_items i join public.orders o on o.id=i.order_id join public.clients c on c.id=o.client_id
+ where ${where} order by coalesce(i.due_date,o.promised_date) nulls last,o.reference,i.sort_order,i.id limit $2 offset $3`,[workshopId,pageSize,(page-1)*pageSize]),
+ ]);
+ return {items,page,pageSize,total:count?.total??0};
 }
-
-function inDays(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-/**
- * Items still to hand over, i.e. neither delivered nor cancelled, on an order
- * that is itself not cancelled. Shared by every count below.
- */
-const LIVE_ITEM = `
-  oi.status NOT IN ('remis', 'annule')
-  AND o.cancelled_at IS NULL
-`;
-
-export function getDashboardCounts(workshopId: string): DashboardCounts {
-  const row = queryOne<{
-    due_today: number;
-    due_week: number;
-    late: number;
-    ready: number;
-  }>(
-    `SELECT
-       SUM(CASE WHEN ${LIVE_ITEM} AND COALESCE(oi.due_date, o.promised_date) = ?
-                THEN 1 ELSE 0 END) AS due_today,
-       SUM(CASE WHEN ${LIVE_ITEM} AND COALESCE(oi.due_date, o.promised_date) BETWEEN ? AND ?
-                THEN 1 ELSE 0 END) AS due_week,
-       SUM(CASE WHEN ${LIVE_ITEM} AND COALESCE(oi.due_date, o.promised_date) < ?
-                THEN 1 ELSE 0 END) AS late,
-       SUM(CASE WHEN oi.status = 'pret' AND o.cancelled_at IS NULL
-                THEN 1 ELSE 0 END) AS ready
-     FROM order_items oi
-     JOIN orders o ON o.id = oi.order_id
-    WHERE oi.workshop_id = ?`,
-    [today(), today(), inDays(7), today(), workshopId],
-  );
-
-  return {
-    dueToday: row?.due_today ?? 0,
-    dueWithinSevenDays: row?.due_week ?? 0,
-    late: row?.late ?? 0,
-    readyNotDelivered: row?.ready ?? 0,
-  };
-}
-
-/**
- * Outstanding receivables across the workshop.
- *
- * Computed per order rather than in one aggregate: the discount cap and the
- * overpayment floor of §8.7 do not survive a naive SUM, and an overpaid order
- * must not offset another order's debt.
- */
-export function getDashboardMoney(workshopId: string, currency: CurrencyCode): DashboardMoney {
-  const rows = query<{ order_total: number; net_collected: number }>(
-    `SELECT
-       o.id,
-       MAX(0,
-         COALESCE((SELECT SUM(oi.unit_price_amount * oi.quantity)
-                     FROM order_items oi
-                    WHERE oi.order_id = o.id AND oi.status <> 'annule'), 0)
-         - o.discount_amount
-       ) AS order_total,
-       COALESCE((SELECT SUM(CASE WHEN m.kind = 'payment' THEN m.amount
-                                 WHEN m.kind = 'refund'  THEN -m.amount
-                                 ELSE 0 END)
-                   FROM financial_movements m
-                  WHERE m.order_id = o.id AND m.status = 'confirmed'), 0) AS net_collected
-     FROM orders o
-    WHERE o.workshop_id = ? AND o.cancelled_at IS NULL
-    GROUP BY o.id`,
-    [workshopId],
-  );
-
-  const outstanding = rows.reduce((total, row) => {
-    const due = row.order_total - row.net_collected;
-    return total + Math.max(due, 0);
-  }, 0);
-
-  const monthStart = `${today().slice(0, 7)}-01`;
-
-  return {
-    outstanding: money(outstanding, currency),
-    collectedThisMonth: collectedBetween(workshopId, monthStart, today(), currency),
-  };
-}
-
-export type AgendaItem = {
-  item_id: string;
-  order_id: string;
-  reference: string;
-  client_name: string;
-  description: string;
-  status: string;
-  due_date: string | null;
-};
-
-/** Upcoming and overdue work, ordered by urgency then deadline (§8.6). */
-export function getAgenda(workshopId: string, limit = 25): AgendaItem[] {
-  return query<AgendaItem>(
-    `SELECT oi.id AS item_id, o.id AS order_id, o.reference,
-            c.display_name AS client_name, oi.description, oi.status,
-            COALESCE(oi.due_date, o.promised_date) AS due_date
-       FROM order_items oi
-       JOIN orders o  ON o.id = oi.order_id
-       JOIN clients c ON c.id = o.client_id
-      WHERE oi.workshop_id = ? AND ${LIVE_ITEM}
-      ORDER BY (due_date IS NULL), due_date ASC
-      LIMIT ?`,
-    [workshopId, limit],
-  );
+export async function getAgenda(workshopId:string,limit=25):Promise<AgendaItem[]>{
+ return sql<AgendaItem>(`select i.id item_id,i.order_id,o.reference,c.display_name client_name,coalesce(i.description,'') description,
+ case i.status when 'todo' then 'a_realiser' when 'ready' then 'pret' when 'in_progress' then 'en_cours' when 'fitting' then 'a_essayer' when 'delivered' then 'remis' else 'annule' end status,
+ coalesce(i.due_date,o.promised_date) due_date from public.order_items i join public.orders o on o.id=i.order_id join public.clients c on c.id=o.client_id
+ where i.workshop_id=$1 and i.status not in('delivered','cancelled') and o.cancelled_at is null order by due_date nulls last limit $2`,[workshopId,limit]);
 }

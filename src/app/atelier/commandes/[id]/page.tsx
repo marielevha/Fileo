@@ -2,11 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import PageHeader from "@/components/app/PageHeader";
+import OrderAttachments from "@/components/orders/OrderAttachments";
 import Icon from "@/components/ui/Icon";
 import { requireWorkshop } from "@/lib/auth/guards";
 import { formatMoney, money, multiply, type CurrencyCode } from "@/lib/money";
+import { listOrderAttachmentsWithUrls } from "@/lib/repos/attachments";
 import { getOrder, ITEM_STATUS_LABELS, ORDER_STATE_LABELS, type ItemStatus } from "@/lib/repos/orders";
 import { listMovements, METHOD_LABELS, type MovementMethod } from "@/lib/repos/payments";
+import { localePath } from "@/lib/i18n/config";
+import { getLocale } from "@/lib/i18n/request";
 
 export const metadata: Metadata = {
   title: "Commande",
@@ -15,23 +19,30 @@ export const metadata: Metadata = {
 
 export default async function OrderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ encaissement?: string }>;
 }) {
   const { workshop } = await requireWorkshop("orders.read");
+  const locale = await getLocale();
   const { id } = await params;
+  const query = await searchParams;
 
-  const summary = getOrder(workshop.id, id, workshop.canViewMoney);
+  const summary = await getOrder(workshop.id, id, workshop.canViewMoney);
   if (!summary) notFound();
 
   const { order, items, state, balance, isLate } = summary;
   const currency = order.currency as CurrencyCode;
-  const movements = workshop.canViewMoney ? listMovements(workshop.id, order.id) : [];
+  const [movements, attachments] = await Promise.all([
+    workshop.canViewMoney ? listMovements(workshop.id, order.id) : Promise.resolve([]),
+    listOrderAttachmentsWithUrls(workshop.id, order.id),
+  ]);
 
   return (
     <>
       <Link
-        href="/atelier/commandes"
+        href={localePath(locale, "/atelier/commandes")}
         className="text-base-content/60 hover:text-primary mb-4 inline-flex items-center gap-1.5 text-sm transition-colors"
       >
         <Icon name="arrowRight" className="h-4 w-4 rotate-180" />
@@ -49,6 +60,13 @@ export default async function OrderDetailPage({
         }
       />
 
+      {query.encaissement === "ok" ? (
+        <p className="alert alert-success mb-6 py-3 text-sm">
+          <Icon name="check" className="h-5 w-5" />
+          Encaissement enregistré avec succès.
+        </p>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <section className="bg-base-100 border-base-300 rounded-2xl border">
@@ -62,12 +80,16 @@ export default async function OrderDetailPage({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium">{item.description}</p>
+                      <p className="text-primary mt-1 text-xs font-semibold uppercase tracking-wide">
+                        {item.work_type === "retouche" ? "Retouche" : "Creation"}
+                      </p>
                       <p className="text-base-content/55 mt-0.5 text-sm">
                         {item.category} · quantité {item.quantity}
                         {item.due_date
                           ? ` · échéance ${new Date(`${item.due_date}T00:00:00`).toLocaleDateString("fr-FR")}`
                           : ""}
                       </p>
+                      <ItemMeasurements item={item} />
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -100,12 +122,26 @@ export default async function OrderDetailPage({
             </section>
           ) : null}
 
+          <section className="bg-base-100 border-base-300 rounded-2xl border">
+            <h2 className="border-base-300 font-display border-b px-6 py-4 font-bold">
+              Pieces jointes ({attachments.length})
+            </h2>
+
+            {attachments.length === 0 ? (
+              <p className="text-base-content/55 px-6 py-10 text-center text-sm">
+                Aucune photo ou note jointe a cette commande.
+              </p>
+            ) : (
+              <OrderAttachments attachments={attachments} />
+            )}
+          </section>
+
           {workshop.canViewMoney ? (
             <section className="bg-base-100 border-base-300 rounded-2xl border">
               <div className="border-base-300 flex items-center justify-between border-b px-6 py-4">
                 <h2 className="font-display font-bold">Encaissements</h2>
                 <Link
-                  href={`/atelier/commandes/${order.id}/encaissement`}
+                  href={localePath(locale, `/atelier/commandes/${order.id}/encaissement`)}
                   className="btn btn-primary btn-sm"
                 >
                   Enregistrer un encaissement
@@ -204,7 +240,7 @@ export default async function OrderDetailPage({
           <section className="bg-base-100 border-base-300 rounded-2xl border p-6">
             <h2 className="font-display font-bold">Client</h2>
             <Link
-              href={`/atelier/clients/${order.client_id}`}
+              href={localePath(locale, `/atelier/clients/${order.client_id}`)}
               className="link link-primary mt-2 block text-sm"
             >
               {order.client_name}
@@ -222,6 +258,68 @@ export default async function OrderDetailPage({
         </aside>
       </div>
     </>
+  );
+}
+
+type MeasurementSnapshot = {
+  wearer_name?: string | null;
+  wearer_relation?: string | null;
+  values?: Record<string, unknown>;
+  notes?: string | null;
+};
+
+function parseMeasurements(value: string | null): MeasurementSnapshot | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as MeasurementSnapshot;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function ItemMeasurements({
+  item,
+}: {
+  item: {
+    wearer_name?: string | null;
+    wearer_relation?: string | null;
+    measurement_snapshot: string | null;
+  };
+}) {
+  const snapshot = parseMeasurements(item.measurement_snapshot);
+  const wearerName = item.wearer_name ?? snapshot?.wearer_name ?? null;
+  const wearerRelation = item.wearer_relation ?? snapshot?.wearer_relation ?? null;
+  const values = snapshot?.values && typeof snapshot.values === "object"
+    ? Object.entries(snapshot.values)
+    : [];
+
+  if (!wearerName && !wearerRelation && values.length === 0 && !snapshot?.notes) return null;
+
+  return (
+    <div className="mt-3 rounded-xl border border-base-300 bg-base-200/35 p-3 text-sm">
+      {wearerName || wearerRelation ? (
+        <p className="font-medium">
+          Pour : {wearerName ?? "Non precise"}
+          {wearerRelation ? <span className="text-base-content/55"> Â· {wearerRelation}</span> : null}
+        </p>
+      ) : null}
+
+      {values.length > 0 ? (
+        <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+          {values.map(([label, measurementValue]) => (
+            <div key={label} className="flex justify-between gap-3">
+              <dt className="text-base-content/55">{label}</dt>
+              <dd className="font-medium">{String(measurementValue)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      {snapshot?.notes ? (
+        <p className="text-base-content/65 mt-2 whitespace-pre-line">{snapshot.notes}</p>
+      ) : null}
+    </div>
   );
 }
 

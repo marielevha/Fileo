@@ -1,8 +1,17 @@
 import Link from "next/link";
 import Icon from "@/components/ui/Icon";
-import { heroPoints, site } from "@/lib/site";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 
-export default function Hero() {
+export default async function Hero() {
+  const locale = await getLocale();
+  const copy = getMessages(locale).home;
+  const affiliateCta = {
+    fr: "Devenir affilie Fileo",
+    en: "Become a Fileo affiliate",
+    lg: "Koma affilie Fileo",
+  }[locale];
   return (
     <section className="relative flex min-h-[92vh] items-center overflow-hidden pt-28 pb-20">
       <div aria-hidden="true" className="absolute inset-0 -z-10">
@@ -22,19 +31,19 @@ export default function Hero() {
         <div className="animate-fade-up">
           <span className="bg-primary/12 text-primary ring-primary/25 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ring-1">
             <Icon name="sparkles" className="h-4 w-4" />
-            Pour les ateliers de couture
+            {copy.eyebrow}
           </span>
 
           <h1 className="font-display mt-7 text-[length:var(--text-display)] leading-[0.95] font-extrabold">
-            <span className="text-gradient-brand">{site.tagline}</span>
+            <span className="text-gradient-brand">{copy.title}</span>
           </h1>
 
           <p className="text-base-content/80 mt-6 max-w-xl text-lg leading-relaxed text-pretty sm:text-xl">
-            {site.description}
+            {copy.intro}
           </p>
 
           <ul className="mt-8 space-y-3">
-            {heroPoints.map((point) => (
+            {copy.heroPoints.map((point) => (
               <li key={point} className="flex items-start gap-3">
                 <span className="bg-success/15 text-success mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full">
                   <Icon name="check" className="h-3 w-3" strokeWidth={3} />
@@ -45,17 +54,20 @@ export default function Hero() {
           </ul>
 
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link href="/inscription" className="btn btn-primary btn-lg gap-2 shadow-lg">
-              Créer mon atelier
+            <Link href={localePath(locale, "/inscription")} className="btn btn-primary btn-lg gap-2 shadow-lg">
+              {copy.primaryCta}
               <Icon name="arrowRight" className="h-5 w-5" />
             </Link>
-            <Link href="/#fonctionnalites" className="btn btn-outline btn-lg">
-              Voir les fonctionnalités
+            <Link href={localePath(locale, "/#fonctionnalites")} className="btn btn-outline btn-lg">
+              {copy.secondaryCta}
             </Link>
           </div>
 
           <p className="text-base-content/50 mt-4 text-sm">
-            Essai de 14 jours. Aucun moyen de paiement demandé pour démarrer.
+            {copy.trial}{" "}
+            <Link href={localePath(locale, "/affiliation")} className="link link-primary font-medium">
+              {affiliateCta}
+            </Link>
           </p>
         </div>
 
@@ -67,15 +79,15 @@ export default function Hero() {
                 <span className="bg-error/60 h-3 w-3 rounded-full" />
                 <span className="bg-warning/60 h-3 w-3 rounded-full" />
                 <span className="bg-success/60 h-3 w-3 rounded-full" />
-                <span className="text-base-content/40 ml-3 text-xs">Mon atelier</span>
+                <span className="text-base-content/40 ml-3 text-xs">{copy.dashboard.workshop}</span>
               </div>
 
               <div className="space-y-4 p-5">
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: "À livrer", value: "3", accent: "accent-1" },
-                    { label: "En retard", value: "1", accent: "accent-3" },
-                    { label: "Prêtes", value: "2", accent: "accent-2" },
+                    { label: copy.dashboard.due, value: "3", accent: "accent-1" },
+                    { label: copy.dashboard.overdue, value: "1", accent: "accent-3" },
+                    { label: copy.dashboard.ready, value: "2", accent: "accent-2" },
                   ].map((tile) => (
                     <div
                       key={tile.label}
@@ -91,9 +103,9 @@ export default function Hero() {
 
                 <div className="border-base-300 space-y-3 rounded-xl border p-4">
                   {[
-                    { ref: "CMD-0001", who: "Chancelvie L.", state: "En cours", tone: "accent-2" },
-                    { ref: "CMD-0002", who: "Grâce B.", state: "En retard", tone: "accent-3" },
-                    { ref: "CMD-0003", who: "Rodrigue S.", state: "Prêt", tone: "accent-1" },
+                    { ref: "CMD-0001", who: "Chancelvie L.", state: copy.dashboard.inProgress, tone: "accent-2" },
+                    { ref: "CMD-0002", who: "Grâce B.", state: copy.dashboard.overdue, tone: "accent-3" },
+                    { ref: "CMD-0003", who: "Rodrigue S.", state: copy.dashboard.readyOne, tone: "accent-1" },
                   ].map((row) => (
                     <div key={row.ref} className={`${row.tone} flex items-center gap-3`}>
                       <span className="bg-base-200 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold">
@@ -111,7 +123,7 @@ export default function Hero() {
                 </div>
 
                 <div className="border-base-300 flex items-center justify-between rounded-xl border p-4">
-                  <span className="text-base-content/55 text-sm">Reste à encaisser</span>
+                  <span className="text-base-content/55 text-sm">{copy.dashboard.remaining}</span>
                   <span className="font-display text-primary text-lg font-bold">37 500 FCFA</span>
                 </div>
               </div>
@@ -119,7 +131,7 @@ export default function Hero() {
           </div>
 
           <p className="text-base-content/40 mt-3 text-center text-xs">
-            Aperçu de l&apos;interface — données de démonstration.
+            {copy.dashboard.preview}
           </p>
         </div>
       </div>

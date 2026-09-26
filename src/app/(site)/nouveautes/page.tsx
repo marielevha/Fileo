@@ -10,8 +10,8 @@ export const metadata: Metadata = {
   description: `Les évolutions de ${site.name}, datées et par support.`,
 };
 
-export default function NouveautesPage() {
-  const posts = listPublished("news", 50);
+export default async function NouveautesPage() {
+  const posts = await listPublished("news", 50);
 
   return (
     <>

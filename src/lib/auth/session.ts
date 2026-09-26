@@ -1,221 +1,89 @@
 import "server-only";
 
-import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
-import { execute, newId, nowIso, queryOne, toBool } from "@/lib/db";
 import type { Actor, PlatformRole, WorkshopRole } from "@/lib/permissions";
+import { getSupabaseSession, supabaseMobileAuth } from "@/lib/supabase/mobile-auth";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
-/**
- * Session handling (§7.1 AUTH-02 / AUTH-04).
- *
- * The cookie holds a random token; only its SHA-256 lives in the database, so
- * a database leak does not hand out live sessions. Sessions are listable and
- * revocable per device.
- */
+const ACCESS_COOKIE = "fileo_access_token";
+const REFRESH_COOKIE = "fileo_refresh_token";
+const WORKSHOP_COOKIE = "fileo_workshop";
+const WEB_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-const COOKIE_NAME = "fileo_session";
-const SESSION_DAYS = 30;
+export type CurrentUser = { id: string; fullName: string; phone: string; platformRoles: PlatformRole[] };
+export type SessionContext = {
+  user: CurrentUser; actor: Actor;
+  workshop: { id: string; name: string; currency: string; countryCode: string; timezone: string; status: string; role: WorkshopRole; canViewMoney: boolean; measurementUnits: string[] } | null;
+};
 
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+const cookieOptions = (expires?: Date) => ({
+  httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", expires,
+});
+
+export async function createSession(accessToken: string, refreshToken: string, expiresAt?: number): Promise<void> {
+  const store = await cookies();
+  const sessionExpiresAt = new Date(Date.now() + WEB_SESSION_MAX_AGE_MS);
+  const accessExpiresAt = expiresAt ? new Date(Math.min(expiresAt * 1000, sessionExpiresAt.getTime())) : sessionExpiresAt;
+  store.set(ACCESS_COOKIE, accessToken, cookieOptions(accessExpiresAt));
+  store.set(REFRESH_COOKIE, refreshToken, cookieOptions(sessionExpiresAt));
 }
 
-export async function createSession(
-  userId: string,
-  options: { workshopId?: string | null; userAgent?: string | null } = {},
-): Promise<void> {
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
+export async function createSessionToken(): Promise<never> {
+  throw new Error("Les sessions locales ont ete remplacees par Supabase Auth.");
+}
 
-  execute(
-    `INSERT INTO sessions
-       (id, user_id, token_hash, workshop_id, user_agent, created_at, last_seen_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      newId(),
-      userId,
-      hashToken(token),
-      options.workshopId ?? null,
-      options.userAgent ?? null,
-      nowIso(),
-      nowIso(),
-      expiresAt.toISOString(),
-    ],
-  );
-
-  const store = await cookies();
-  store.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires: expiresAt,
-  });
+export async function destroySessionToken(token: string): Promise<void> {
+  await supabaseAdmin().auth.admin.signOut(token, "local");
 }
 
 export async function destroySession(): Promise<void> {
   const store = await cookies();
-  const token = store.get(COOKIE_NAME)?.value;
-
-  if (token) {
-    execute(`UPDATE sessions SET revoked_at = ? WHERE token_hash = ?`, [
-      nowIso(),
-      hashToken(token),
-    ]);
-  }
-
-  store.delete(COOKIE_NAME);
+  const token = store.get(ACCESS_COOKIE)?.value;
+  if (token) await supabaseAdmin().auth.admin.signOut(token, "local").catch(() => undefined);
+  store.delete(ACCESS_COOKIE); store.delete(REFRESH_COOKIE); store.delete(WORKSHOP_COOKIE);
 }
 
-/** Switches which workshop the current session is acting in. */
 export async function setSessionWorkshop(workshopId: string): Promise<void> {
-  const store = await cookies();
-  const token = store.get(COOKIE_NAME)?.value;
-  if (!token) return;
-
-  execute(`UPDATE sessions SET workshop_id = ? WHERE token_hash = ?`, [
-    workshopId,
-    hashToken(token),
-  ]);
+  (await cookies()).set(WORKSHOP_COOKIE, workshopId, cookieOptions(new Date(Date.now() + WEB_SESSION_MAX_AGE_MS)));
 }
 
-type SessionRow = {
-  session_id: string;
-  user_id: string;
-  full_name: string;
-  phone_e164: string;
-  user_status: string;
-  platform_roles: string;
-  workshop_id: string | null;
-};
+export async function getSessionByToken(token: string): Promise<SessionContext | null> {
+  return getSupabaseSession(token);
+}
 
-export type CurrentUser = {
-  id: string;
-  fullName: string;
-  phone: string;
-  platformRoles: PlatformRole[];
-};
-
-export type SessionContext = {
-  user: CurrentUser;
-  actor: Actor;
-  workshop: {
-    id: string;
-    name: string;
-    currency: string;
-    countryCode: string;
-    timezone: string;
-    status: string;
-    role: WorkshopRole;
-    canViewMoney: boolean;
-  } | null;
-};
-
-/**
- * Resolves the caller from the session cookie. Returns null rather than
- * throwing so callers can decide between a redirect and a 401.
- */
 export async function getSession(): Promise<SessionContext | null> {
   const store = await cookies();
-  const token = store.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-
-  const row = queryOne<SessionRow>(
-    `SELECT s.id            AS session_id,
-            u.id            AS user_id,
-            u.full_name     AS full_name,
-            u.phone_e164    AS phone_e164,
-            u.status        AS user_status,
-            u.platform_roles AS platform_roles,
-            s.workshop_id   AS workshop_id
-       FROM sessions s
-       JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = ?
-        AND s.revoked_at IS NULL
-        AND s.expires_at > ?`,
-    [hashToken(token), nowIso()],
-  );
-
-  if (!row || row.user_status !== "active") return null;
-
-  execute(`UPDATE sessions SET last_seen_at = ? WHERE id = ?`, [nowIso(), row.session_id]);
-
-  const platformRoles = parsePlatformRoles(row.platform_roles);
-
-  const user: CurrentUser = {
-    id: row.user_id,
-    fullName: row.full_name,
-    phone: row.phone_e164,
-    platformRoles,
-  };
-
-  // Fall back to the user's only membership when the session has no workshop
-  // pinned yet (fresh login, or one-workshop accounts).
-  const membership = queryOne<{
-    workshop_id: string;
-    name: string;
-    currency: string;
-    country_code: string;
-    timezone: string;
-    workshop_status: string;
-    role: string;
-    can_view_money: number;
-    membership_status: string;
-  }>(
-    `SELECT w.id AS workshop_id, w.name, w.currency, w.country_code, w.timezone,
-            w.status AS workshop_status,
-            m.role, m.can_view_money, m.status AS membership_status
-       FROM memberships m
-       JOIN workshops w ON w.id = m.workshop_id
-      WHERE m.user_id = ?
-        AND m.status = 'active'
-        AND (? IS NULL OR m.workshop_id = ?)
-      ORDER BY (m.role = 'owner') DESC, w.created_at ASC
-      LIMIT 1`,
-    [row.user_id, row.workshop_id, row.workshop_id],
-  );
-
-  if (!membership) {
-    return { user, actor: { userId: user.id, platformRoles }, workshop: null };
+  let accessToken = store.get(ACCESS_COOKIE)?.value;
+  if (accessToken) {
+    const session = await getSupabaseSession(accessToken);
+    if (session) return session;
   }
-
-  const role: WorkshopRole = membership.role === "owner" ? "owner" : "collaborator";
-  const canViewMoney = role === "owner" || toBool(membership.can_view_money);
-
-  return {
-    user,
-    actor: {
-      userId: user.id,
-      platformRoles,
-      workshop: {
-        id: membership.workshop_id,
-        role,
-        canViewMoney,
-        status: membership.membership_status as "active" | "disabled" | "invited",
-      },
-    },
-    workshop: {
-      id: membership.workshop_id,
-      name: membership.name,
-      currency: membership.currency,
-      countryCode: membership.country_code,
-      timezone: membership.timezone,
-      status: membership.workshop_status,
-      role,
-      canViewMoney,
-    },
-  };
+  const refreshToken = store.get(REFRESH_COOKIE)?.value;
+  if (!refreshToken) return null;
+  const { data, error } = await supabaseMobileAuth().auth.refreshSession({ refresh_token: refreshToken });
+  if (error || !data.session) {
+    try {
+      store.delete(ACCESS_COOKIE); store.delete(REFRESH_COOKIE); store.delete(WORKSHOP_COOKIE);
+    } catch {
+      // Server Components can read cookies but only actions and route handlers may update them.
+    }
+    return null;
+  }
+  accessToken = data.session.access_token;
+  try {
+    await createSession(accessToken, data.session.refresh_token, data.session.expires_at);
+  } catch {
+    // Server Components can read cookies but only actions and route handlers may update them.
+  }
+  return getSupabaseSession(accessToken);
 }
 
-function parsePlatformRoles(raw: string): PlatformRole[] {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (value): value is PlatformRole =>
-        value === "admin" || value === "support" || value === "content_manager",
-    );
-  } catch {
-    return [];
+export function parsePlatformRoles(raw: string | string[] | null | undefined): PlatformRole[] {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try { parsed = JSON.parse(raw); } catch { return []; }
   }
+  return Array.isArray(parsed)
+    ? parsed.filter((value): value is PlatformRole => value === "admin" || value === "support" || value === "content_manager")
+    : [];
 }

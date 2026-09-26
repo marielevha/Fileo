@@ -26,8 +26,8 @@ function formatDuration(seconds: number | null): string | null {
   return seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
 }
 
-export default function PriseEnMainPage() {
-  const tutorials = listPublished("tutorial", 100);
+export default async function PriseEnMainPage() {
+  const tutorials = await listPublished("tutorial", 100);
 
   const groups = new Map<string, typeof tutorials>();
   for (const tutorial of tutorials) {

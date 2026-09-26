@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="750" viewBox="0 0 660 750">
+  <defs>
+    <linearGradient id="fileo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E84C9B" />
+      <stop offset="100%" stop-color="#20B8E5" />
+    </linearGradient>
+    <style>
+      @font-face {
+        font-family: "Outfit";
+        src: url("../../node_modules/@expo-google-fonts/outfit/800ExtraBold/Outfit_800ExtraBold.ttf");
+        font-weight: 800;
+      }
+    </style>
+  </defs>
+
+  <rect x="190" y="65" width="280" height="280" rx="72" fill="url(#fileo)" />
+  <g
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    transform="translate(190 65) scale(8.75)"
+  >
+    <path
+      d="M20.6 5.9C15.8 4.8 11.7 7.2 12 10.8c.3 3.4 4.7 3.6 5.7 6.4.7 2-.7 3.9-2.5 4.5"
+      stroke-width="1.7"
+      opacity=".82"
+    />
+    <ellipse cx="22.6" cy="8" rx="2.1" ry="2.9" transform="rotate(37 22.6 8)" stroke-width="1.7" />
+    <path d="M21 10.7 10.4 25" stroke-width="2.1" />
+    <path d="M10.4 25 7.5 28.7 10 26.2Z" fill="#FFFFFF" stroke="none" />
+  </g>
+
+  <text
+    x="330"
+    y="570"
+    fill="#FFFFFF"
+    font-family="Outfit, Arial, sans-serif"
+    font-size="154"
+    font-weight="800"
+    text-anchor="middle"
+  >Fil<tspan fill="#E84C9B">éo</tspan></text>
+</svg>

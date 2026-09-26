@@ -1,326 +1,52 @@
 import "server-only";
-
-import { execute, newId, nowIso, query, queryOne, transaction } from "@/lib/db";
-import { recordAudit } from "@/lib/audit";
-import { money, type CurrencyCode, type Money } from "@/lib/money";
-import { getOrderBalance } from "./orders";
-
-/**
- * Financial writes — cahier des charges §8.7.
- *
- * Three rules drive every function here:
- *   1. The ledger is append-only. A confirmed movement is never updated or
- *      deleted; it is neutralised by a counter-entry that carries a reason.
- *   2. Writes are idempotent. Replaying the same operation key must never
- *      produce a second movement (REC-04).
- *   3. Amounts are always strictly positive; direction comes from `kind`.
- */
-
-export type MovementKind = "payment" | "refund" | "correction";
-export type MovementMethod = "cash" | "mobile_money" | "transfer" | "other";
-
-export const METHOD_LABELS: Record<MovementMethod, string> = {
-  cash: "Espèces",
-  mobile_money: "Mobile money",
-  transfer: "Virement",
-  other: "Autre",
-};
-
-export type MovementRow = {
-  id: string;
-  order_id: string;
-  kind: string;
-  amount: number;
-  currency: string;
-  method: string;
-  reference: string | null;
-  effective_date: string;
-  status: string;
-  reverses_id: string | null;
-  void_reason: string | null;
-  created_by: string;
-  created_at: string;
-};
-
-export class FinancialError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "FinancialError";
-  }
+import {randomUUID} from "node:crypto";
+import {recordAudit} from "@/lib/audit";
+import {sql,sqlOne,withPgTransaction} from "@/lib/supabase/postgres";
+import {computeOrderBalance,money,multiply,type CurrencyCode,type Money} from "@/lib/money";
+import {deriveOrderState,getOrderBalance,isOrderLate,type OrderItemRow,type OrderRow,type OrderState} from "./orders";
+export type MovementKind="payment"|"refund"|"correction";export type MovementMethod="cash"|"mobile_money"|"transfer"|"other";
+export const METHOD_LABELS:Record<MovementMethod,string>={cash:"Especes",mobile_money:"Mobile money",transfer:"Virement",other:"Autre"};
+export type MovementRow={id:string;order_id:string;kind:string;amount:number;currency:string;method:string;reference:string|null;effective_date:string;status:string;reverses_id:string|null;void_reason:string|null;created_by:string;created_at:string};
+export class FinancialError extends Error{constructor(message:string){super(message);this.name="FinancialError";}}
+export type RecordPaymentInput={workshopId:string;orderId:string;actorUserId:string;amount:Money;method:MovementMethod;reference?:string|null;effectiveDate:string;idempotencyKey:string;pending?:boolean};
+export type RecordPaymentResult={movementId:string;deduplicated:boolean};
+const dbMethod=(m:MovementMethod)=>m==="transfer"?"bank_transfer":m;
+export async function recordPayment(input:RecordPaymentInput):Promise<RecordPaymentResult>{
+ if(input.amount.amount<=0)throw new FinancialError("Le montant d'un encaissement doit etre strictement positif.");
+ return withPgTransaction(async client=>{
+  const order=await sqlOne<{currency:string;cancelled_at:string|null}>("select currency,cancelled_at from public.orders where id=$1 and workshop_id=$2 for update",[input.orderId,input.workshopId],client);
+  if(!order)throw new FinancialError("Commande introuvable dans cet atelier.");if(order.cancelled_at)throw new FinancialError("Aucun encaissement ne peut etre ajoute a une commande annulee.");if(order.currency!==input.amount.currency)throw new FinancialError(`Devise incompatible : la commande est en ${order.currency}.`);
+  const existing=await sqlOne<MovementRow>("select * from public.financial_movements where workshop_id=$1 and idempotency_key=$2",[input.workshopId,input.idempotencyKey],client);
+  if(existing){const same=existing.order_id===input.orderId&&existing.kind==="payment"&&existing.amount===input.amount.amount&&existing.currency===input.amount.currency&&existing.method===dbMethod(input.method)&&existing.reference===(input.reference??null)&&existing.effective_date===input.effectiveDate;if(!same)throw new FinancialError("Cette tentative d'encaissement a deja ete utilisee avec d'autres donnees.");return{movementId:existing.id,deduplicated:true};}
+  const id=randomUUID();await sql(`insert into public.financial_movements(id,workshop_id,order_id,kind,amount,currency,method,reference,effective_date,status,idempotency_key,created_by) values($1,$2,$3,'payment',$4,$5,$6,$7,$8,'confirmed',$9,$10)`,[id,input.workshopId,input.orderId,input.amount.amount,input.amount.currency,dbMethod(input.method),input.reference??null,input.effectiveDate,input.idempotencyKey,input.actorUserId],client);
+  await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"payment.record",entityKind:"financial_movement",entityId:id,after:{orderId:input.orderId,amount:input.amount.amount,currency:input.amount.currency,method:input.method}},client);return{movementId:id,deduplicated:false};
+ });
 }
-
-export type RecordPaymentInput = {
-  workshopId: string;
-  orderId: string;
-  actorUserId: string;
-  amount: Money;
-  method: MovementMethod;
-  reference?: string | null;
-  effectiveDate: string;
-  /** Supplied by the client so a retry cannot double-post (§8.7, REC-04). */
-  idempotencyKey: string;
-  /** Offline entries stay `pending` until the server confirms them (§10.1). */
-  pending?: boolean;
-};
-
-export type RecordPaymentResult = {
-  movementId: string;
-  /** True when an existing movement was returned instead of a new one. */
-  deduplicated: boolean;
-};
-
-export function recordPayment(input: RecordPaymentInput): RecordPaymentResult {
-  if (input.amount.amount <= 0) {
-    throw new FinancialError("Le montant d'un encaissement doit être strictement positif.");
-  }
-
-  return transaction(() => {
-    const order = queryOne<{ id: string; currency: string; cancelled_at: string | null }>(
-      `SELECT id, currency, cancelled_at FROM orders WHERE id = ? AND workshop_id = ?`,
-      [input.orderId, input.workshopId],
-    );
-
-    if (!order) throw new FinancialError("Commande introuvable dans cet atelier.");
-
-    if (order.currency !== input.amount.currency) {
-      throw new FinancialError(
-        `Devise incompatible : la commande est en ${order.currency}.`,
-      );
-    }
-
-    // Replay of an already-accepted operation: return the original.
-    const existing = queryOne<{ id: string }>(
-      `SELECT id FROM financial_movements WHERE workshop_id = ? AND idempotency_key = ?`,
-      [input.workshopId, input.idempotencyKey],
-    );
-
-    if (existing) return { movementId: existing.id, deduplicated: true };
-
-    const id = newId();
-
-    execute(
-      `INSERT INTO financial_movements
-         (id, workshop_id, order_id, kind, amount, currency, method, reference,
-          effective_date, status, idempotency_key, created_by, created_at)
-       VALUES (?, ?, ?, 'payment', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        input.workshopId,
-        input.orderId,
-        input.amount.amount,
-        input.amount.currency,
-        input.method,
-        input.reference ?? null,
-        input.effectiveDate,
-        input.pending ? "pending" : "confirmed",
-        input.idempotencyKey,
-        input.actorUserId,
-        nowIso(),
-      ],
-    );
-
-    recordAudit({
-      workshopId: input.workshopId,
-      actorUserId: input.actorUserId,
-      action: "payment.record",
-      entityKind: "financial_movement",
-      entityId: id,
-      after: {
-        orderId: input.orderId,
-        amount: input.amount.amount,
-        currency: input.amount.currency,
-        method: input.method,
-      },
-    });
-
-    return { movementId: id, deduplicated: false };
-  });
+export type RecordRefundInput=Omit<RecordPaymentInput,"pending">&{reason:string};
+export async function recordRefund(input:RecordRefundInput):Promise<RecordPaymentResult>{
+ if(input.amount.amount<=0)throw new FinancialError("Le montant d'un remboursement doit etre strictement positif.");
+ const balance=await getOrderBalance(input.orderId,input.amount.currency);if(input.amount.amount>balance.netCollected.amount)throw new FinancialError("Le remboursement depasse le montant disponible.");
+ return withPgTransaction(async client=>{const order=await sqlOne<{currency:string}>("select currency from public.orders where id=$1 and workshop_id=$2 for update",[input.orderId,input.workshopId],client);if(!order)throw new FinancialError("Commande introuvable dans cet atelier.");const existing=await sqlOne<{id:string}>("select id from public.financial_movements where workshop_id=$1 and idempotency_key=$2",[input.workshopId,input.idempotencyKey],client);if(existing)return{movementId:existing.id,deduplicated:true};const id=randomUUID();await sql(`insert into public.financial_movements(id,workshop_id,order_id,kind,amount,currency,method,reference,effective_date,status,void_reason,idempotency_key,created_by) values($1,$2,$3,'refund',$4,$5,$6,$7,$8,'confirmed',$9,$10,$11)`,[id,input.workshopId,input.orderId,input.amount.amount,order.currency,dbMethod(input.method),input.reference??null,input.effectiveDate,input.reason,input.idempotencyKey,input.actorUserId],client);await recordAudit({workshopId:input.workshopId,actorUserId:input.actorUserId,action:"refund.record",entityKind:"financial_movement",entityId:id,reason:input.reason,after:{orderId:input.orderId,amount:input.amount.amount,currency:order.currency}},client);return{movementId:id,deduplicated:false};});
 }
-
-export type RecordRefundInput = Omit<RecordPaymentInput, "pending"> & {
-  reason: string;
-};
-
-/**
- * A refund may not exceed what is actually available to refund (§8.7):
- * confirmed payments minus refunds already issued.
- */
-export function recordRefund(input: RecordRefundInput): RecordPaymentResult {
-  if (input.amount.amount <= 0) {
-    throw new FinancialError("Le montant d'un remboursement doit être strictement positif.");
-  }
-
-  return transaction(() => {
-    const order = queryOne<{ currency: string }>(
-      `SELECT currency FROM orders WHERE id = ? AND workshop_id = ?`,
-      [input.orderId, input.workshopId],
-    );
-
-    if (!order) throw new FinancialError("Commande introuvable dans cet atelier.");
-
-    const existing = queryOne<{ id: string }>(
-      `SELECT id FROM financial_movements WHERE workshop_id = ? AND idempotency_key = ?`,
-      [input.workshopId, input.idempotencyKey],
-    );
-
-    if (existing) return { movementId: existing.id, deduplicated: true };
-
-    const currency = order.currency as CurrencyCode;
-    const balance = getOrderBalance(input.orderId, currency);
-
-    if (input.amount.amount > balance.netCollected.amount) {
-      throw new FinancialError(
-        "Le remboursement dépasse le montant disponible à rembourser sur cette commande.",
-      );
-    }
-
-    const id = newId();
-
-    execute(
-      `INSERT INTO financial_movements
-         (id, workshop_id, order_id, kind, amount, currency, method, reference,
-          effective_date, status, void_reason, idempotency_key, created_by, created_at)
-       VALUES (?, ?, ?, 'refund', ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?)`,
-      [
-        id,
-        input.workshopId,
-        input.orderId,
-        input.amount.amount,
-        currency,
-        input.method,
-        input.reference ?? null,
-        input.effectiveDate,
-        input.reason,
-        input.idempotencyKey,
-        input.actorUserId,
-        nowIso(),
-      ],
-    );
-
-    recordAudit({
-      workshopId: input.workshopId,
-      actorUserId: input.actorUserId,
-      action: "refund.record",
-      entityKind: "financial_movement",
-      entityId: id,
-      reason: input.reason,
-      after: { orderId: input.orderId, amount: input.amount.amount, currency },
-    });
-
-    return { movementId: id, deduplicated: false };
-  });
+export async function voidMovement(params:{workshopId:string;movementId:string;actorUserId:string;reason:string}):Promise<string>{if(!params.reason.trim())throw new FinancialError("Un motif est obligatoire.");return withPgTransaction(async client=>{const original=await sqlOne<MovementRow>("select * from public.financial_movements where id=$1 and workshop_id=$2 for update",[params.movementId,params.workshopId],client);if(!original)throw new FinancialError("Mouvement introuvable.");if(original.status==="voided")throw new FinancialError("Ce mouvement est deja annule.");const counterId=randomUUID();await sql(`insert into public.financial_movements(id,workshop_id,order_id,kind,amount,currency,method,reference,effective_date,status,reverses_id,void_reason,idempotency_key,created_by) values($1,$2,$3,'correction',$4,$5,$6,$7,current_date,'confirmed',$8,$9,$10,$11)`,[counterId,params.workshopId,original.order_id,original.amount,original.currency,original.method,original.reference,original.id,params.reason,`void:${original.id}`,params.actorUserId],client);await sql("update public.financial_movements set status='voided',void_reason=$2,row_version=row_version+1 where id=$1",[original.id,params.reason],client);await recordAudit({workshopId:params.workshopId,actorUserId:params.actorUserId,action:"payment.void",entityKind:"financial_movement",entityId:original.id,reason:params.reason,before:{status:original.status,amount:original.amount},after:{status:"voided",counterEntry:counterId}},client);return counterId;});}
+const movementSelect=`id,order_id,kind::text,amount,currency,case when method='bank_transfer' then 'transfer' else method::text end method,reference,effective_date,status::text,reverses_id,void_reason,created_by,created_at`;
+export async function listMovements(workshopId:string,orderId:string):Promise<MovementRow[]>{return sql<MovementRow>(`select ${movementSelect} from public.financial_movements where workshop_id=$1 and order_id=$2 order by effective_date desc,created_at desc`,[workshopId,orderId]);}
+export async function listRecentMovements(workshopId:string,limit=50){return sql<MovementRow&{reference_label:string;client_name:string}>(`select ${movementSelect},o.reference reference_label,c.display_name client_name from public.financial_movements m join public.orders o on o.id=m.order_id join public.clients c on c.id=o.client_id where m.workshop_id=$1 order by m.effective_date desc,m.created_at desc limit $2`,[workshopId,limit]);}
+export type PaymentOrderFilter="all"|"a_encaisser"|"acompte"|"payes"|"sans_paiement"|"retard"|"trop_percu";
+export type PaymentOrderRow={order:OrderRow;state:OrderState;orderTotal:Money;netCollected:Money;remainingDue:Money;overpayment:Money;lastPaymentDate:string|null;movementCount:number;isLate:boolean};
+export type PaymentOrderStats={totalOrders:number;ordersWithRemainingDue:number;paidOrders:number;overdueOrders:number;overpaidOrders:number;totalRemainingDue:Money;totalCollected:Money;todayCollected:Money};
+export type PaymentOrderPage={items:PaymentOrderRow[];stats:PaymentOrderStats;total:number;page:number;pageSize:number;pageCount:number};
+type RawPaymentOrder=OrderRow&{items:OrderItemRow[];movements:Array<{kind:string;amount:number;status:string;effective_date:string}>;client_name:string};
+export async function listPaymentOrders(workshopId:string,options:{search?:string;filter?:PaymentOrderFilter;page?:number;pageSize?:number;today?:string;currency:CurrencyCode}):Promise<PaymentOrderPage>{
+ const search=options.search?.trim().toLowerCase()??"",today=options.today??new Date().toISOString().slice(0,10),pageSize=Math.min(50,Math.max(1,Math.trunc(options.pageSize??10)));
+ const rawRows=await sql<RawPaymentOrder>(`select o.*,coalesce(c.display_name,'Client supprime') client_name,
+ coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'order_id',i.order_id,'category',i.category,'description',coalesce(i.description,''),'quantity',i.quantity,'unit_price_amount',coalesce(i.unit_price_amount,0),'currency',i.currency,'status',case i.status when 'todo' then 'a_realiser' when 'in_progress' then 'en_cours' when 'fitting' then 'a_essayer' when 'ready' then 'pret' when 'delivered' then 'remis' else 'annule' end,'due_date',i.due_date,'delivered_quantity',i.delivered_quantity,'assignee_user_id',i.assignee_user_id,'measurement_snapshot',i.measurement_snapshot::text) order by i.sort_order) from public.order_items i where i.order_id=o.id),'[]') items,
+ coalesce((select jsonb_agg(jsonb_build_object('kind',m.kind,'amount',m.amount,'status',m.status,'effective_date',m.effective_date)) from public.financial_movements m where m.order_id=o.id),'[]') movements
+ from public.orders o left join public.clients c on c.id=o.client_id where o.workshop_id=$1 order by o.created_at desc,o.id desc`,[workshopId]);
+ const all=rawRows.map(r=>buildPaymentOrderRow(r,options.currency,today));const rows=all.filter(r=>matchesPaymentSearch(r,search)).filter(r=>matchesPaymentFilter(r,options.filter??"all"));const stats=buildPaymentStats(all,rawRows,options.currency,today),pageCount=Math.max(1,Math.ceil(rows.length/pageSize)),page=Math.min(pageCount,Math.max(1,Math.trunc(options.page??1)));return{items:rows.slice((page-1)*pageSize,page*pageSize),stats,total:rows.length,page,pageSize,pageCount};
 }
-
-/**
- * Neutralises a confirmed movement with a counter-entry (§8.7: "pas de
- * modification destructive"). The original row keeps its values and its place
- * in the history; only its status changes to `voided`.
- */
-export function voidMovement(params: {
-  workshopId: string;
-  movementId: string;
-  actorUserId: string;
-  reason: string;
-}): string {
-  if (!params.reason.trim()) {
-    throw new FinancialError("Un motif est obligatoire pour annuler un mouvement.");
-  }
-
-  return transaction(() => {
-    const original = queryOne<MovementRow>(
-      `SELECT * FROM financial_movements WHERE id = ? AND workshop_id = ?`,
-      [params.movementId, params.workshopId],
-    );
-
-    if (!original) throw new FinancialError("Mouvement introuvable dans cet atelier.");
-    if (original.status === "voided") throw new FinancialError("Ce mouvement est déjà annulé.");
-
-    const counterId = newId();
-
-    execute(
-      `INSERT INTO financial_movements
-         (id, workshop_id, order_id, kind, amount, currency, method, reference,
-          effective_date, status, reverses_id, void_reason, idempotency_key,
-          created_by, created_at)
-       VALUES (?, ?, ?, 'correction', ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`,
-      [
-        counterId,
-        params.workshopId,
-        original.order_id,
-        original.amount,
-        original.currency,
-        original.method,
-        original.reference,
-        nowIso().slice(0, 10),
-        original.id,
-        params.reason,
-        `void:${original.id}`,
-        params.actorUserId,
-        nowIso(),
-      ],
-    );
-
-    execute(
-      `UPDATE financial_movements
-          SET status = 'voided', void_reason = ?, row_version = row_version + 1
-        WHERE id = ?`,
-      [params.reason, original.id],
-    );
-
-    recordAudit({
-      workshopId: params.workshopId,
-      actorUserId: params.actorUserId,
-      action: "payment.void",
-      entityKind: "financial_movement",
-      entityId: original.id,
-      reason: params.reason,
-      before: { status: original.status, amount: original.amount },
-      after: { status: "voided", counterEntry: counterId },
-    });
-
-    return counterId;
-  });
-}
-
-export function listMovements(workshopId: string, orderId: string): MovementRow[] {
-  return query<MovementRow>(
-    `SELECT * FROM financial_movements
-      WHERE workshop_id = ? AND order_id = ?
-      ORDER BY effective_date DESC, created_at DESC`,
-    [workshopId, orderId],
-  );
-}
-
-export function listRecentMovements(workshopId: string, limit = 50) {
-  return query<MovementRow & { reference_label: string; client_name: string }>(
-    `SELECT m.*, o.reference AS reference_label, c.display_name AS client_name
-       FROM financial_movements m
-       JOIN orders o ON o.id = m.order_id
-       JOIN clients c ON c.id = o.client_id
-      WHERE m.workshop_id = ?
-      ORDER BY m.effective_date DESC, m.created_at DESC
-      LIMIT ?`,
-    [workshopId, limit],
-  );
-}
-
-/** Sum of confirmed payments minus refunds over a period, for the dashboard. */
-export function collectedBetween(
-  workshopId: string,
-  fromDate: string,
-  toDate: string,
-  currency: CurrencyCode,
-): Money {
-  const row = queryOne<{ total: number | null }>(
-    `SELECT COALESCE(SUM(CASE WHEN kind = 'payment' THEN amount
-                              WHEN kind = 'refund'  THEN -amount
-                              ELSE 0 END), 0) AS total
-       FROM financial_movements
-      WHERE workshop_id = ?
-        AND status = 'confirmed'
-        AND effective_date BETWEEN ? AND ?`,
-    [workshopId, fromDate, toDate],
-  );
-
-  return money(row?.total ?? 0, currency);
-}
+function buildPaymentOrderRow(row:RawPaymentOrder,currency:CurrencyCode,today:string):PaymentOrderRow{const confirmed=row.movements.filter(m=>m.status==="confirmed"),balance=computeOrderBalance({currency,lineTotals:row.items.filter(i=>i.status!=="annule").map(i=>multiply(money(Number(i.unit_price_amount),currency),Number(i.quantity))),discount:money(Number(row.discount_amount??0),currency),confirmedPayments:confirmed.filter(m=>m.kind==="payment").map(m=>money(Number(m.amount),currency)),confirmedRefunds:confirmed.filter(m=>m.kind==="refund").map(m=>money(Number(m.amount),currency))});const order:OrderRow={id:row.id,workshop_id:row.workshop_id,client_id:row.client_id,client_name:row.client_name,reference:row.reference,currency:row.currency,discount_amount:Number(row.discount_amount??0),discount_reason:row.discount_reason??null,instructions:row.instructions??null,promised_date:row.promised_date??null,fitting_date:row.fitting_date??null,cancelled_at:row.cancelled_at??null,created_at:row.created_at};const dates=confirmed.filter(m=>m.kind==="payment").map(m=>m.effective_date).sort((a,b)=>b.localeCompare(a));return{order,state:deriveOrderState(order,row.items),orderTotal:balance.orderTotal,netCollected:balance.netCollected,remainingDue:balance.remainingDue,overpayment:balance.overpayment,lastPaymentDate:dates[0]??null,movementCount:row.movements.filter(m=>m.kind!=="correction").length,isLate:balance.remainingDue.amount>0&&isOrderLate(order,row.items,new Date(`${today}T12:00:00Z`))};}
+function matchesPaymentSearch(r:PaymentOrderRow,s:string){return!s||`${r.order.reference} ${r.order.client_name}`.toLowerCase().includes(s);}
+function matchesPaymentFilter(r:PaymentOrderRow,f:PaymentOrderFilter){if(f==="a_encaisser")return r.remainingDue.amount>0;if(f==="acompte")return r.netCollected.amount>0&&r.remainingDue.amount>0;if(f==="payes")return r.remainingDue.amount===0&&r.overpayment.amount===0;if(f==="sans_paiement")return r.netCollected.amount===0;if(f==="retard")return r.isLate;if(f==="trop_percu")return r.overpayment.amount>0;return true;}
+function buildPaymentStats(rows:PaymentOrderRow[],raw:RawPaymentOrder[],currency:CurrencyCode,today:string):PaymentOrderStats{const todayCollected=raw.reduce((t,r)=>t+r.movements.reduce((s,m)=>m.status!=="confirmed"||m.effective_date!==today?s:m.kind==="payment"?s+Number(m.amount):m.kind==="refund"?s-Number(m.amount):s,0),0);return rows.reduce<PaymentOrderStats>((s,r)=>{s.totalOrders++;s.ordersWithRemainingDue+=r.remainingDue.amount>0?1:0;s.paidOrders+=r.remainingDue.amount===0&&!r.overpayment.amount?1:0;s.overdueOrders+=r.isLate?1:0;s.overpaidOrders+=r.overpayment.amount>0?1:0;s.totalRemainingDue.amount+=r.remainingDue.amount;s.totalCollected.amount+=r.netCollected.amount;return s;},{totalOrders:0,ordersWithRemainingDue:0,paidOrders:0,overdueOrders:0,overpaidOrders:0,totalRemainingDue:money(0,currency),totalCollected:money(0,currency),todayCollected:money(todayCollected,currency)});}
+export async function collectedBetween(workshopId:string,fromDate:string,toDate:string,currency:CurrencyCode):Promise<Money>{const row=await sqlOne<{total:number}>(`select coalesce(sum(case when kind='payment' then amount when kind='refund' then -amount else 0 end),0)::int total from public.financial_movements where workshop_id=$1 and status='confirmed' and effective_date between $2 and $3`,[workshopId,fromDate,toDate]);return money(row?.total??0,currency);}

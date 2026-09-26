@@ -3,6 +3,8 @@ import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import { site } from "@/lib/site";
 import { DARK_THEME, LIGHT_THEME, STORAGE_KEY } from "@/lib/theme";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
 
 /** Body / UI text: neutral, excellent at small sizes. */
 const inter = Inter({
@@ -19,31 +21,25 @@ const outfit = Outfit({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  metadataBase: new URL(site.url),
-  title: {
-    default: `${site.name} — ${site.tagline}`,
-    template: `%s | ${site.name}`,
-  },
-  description: site.description,
-  keywords: [
-    "gestion atelier couture",
-    "logiciel tailleur",
-    "mesures clients",
-    "suivi commandes couture",
-    "Brazzaville",
-    "Kinshasa",
-  ],
-  openGraph: {
-    type: "website",
-    locale: "fr_FR",
-    url: site.url,
-    siteName: site.name,
-    title: `${site.name} — ${site.tagline}`,
-    description: site.description,
-  },
-  robots: { index: true, follow: true },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getLocale();
+  const copy = getMessages(locale);
+  return {
+    metadataBase: new URL(site.url),
+    title: { default: `${site.name} - ${copy.meta.tagline}`, template: `%s | ${site.name}` },
+    description: copy.meta.description,
+    keywords: ["gestion atelier couture", "tailoring workshop software", "mesures clients", "Brazzaville", "Kinshasa"],
+    openGraph: {
+      type: "website",
+      locale: locale === "fr" ? "fr_FR" : locale === "en" ? "en_US" : "ln_CD",
+      url: `${site.url}/${locale}`,
+      siteName: site.name,
+      title: `${site.name} - ${copy.meta.tagline}`,
+      description: copy.meta.description,
+    },
+    robots: { index: true, follow: true },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: [
@@ -72,9 +68,12 @@ const themeScript = `
 })();
 `;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
+  const copy = getMessages(locale);
+
   return (
-    <html lang="fr" className={`${inter.variable} ${outfit.variable}`} suppressHydrationWarning>
+    <html lang={locale === "lg" ? "ln" : locale} className={`${inter.variable} ${outfit.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
@@ -83,7 +82,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="#main"
           className="btn btn-primary btn-sm sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100]"
         >
-          Aller au contenu principal
+          {copy.skip}
         </a>
         {children}
       </body>

@@ -1,6 +1,7 @@
 import "server-only";
 
-import { execute, newId, nowIso } from "./db";
+import { randomUUID } from "node:crypto";
+import { sql, type PgExecutor } from "@/lib/supabase/postgres";
 
 /**
  * Audit trail — §17.1.
@@ -14,6 +15,7 @@ export type AuditAction =
   | "auth.login"
   | "auth.logout"
   | "auth.register"
+  | "user.update"
   | "workshop.create"
   | "workshop.update"
   | "workshop.suspend"
@@ -23,25 +25,39 @@ export type AuditAction =
   | "client.create"
   | "client.update"
   | "client.archive"
+  | "client.delete"
+  | "client.resolve"
   | "measurement.create"
   | "order.create"
   | "order.update"
   | "order.cancel"
+  | "order.resolve"
+  | "order.close"
   | "order.date_change"
   | "order.price_change"
   | "item.status_change"
+  | "item.update"
+  | "item.resolve"
   | "payment.record"
   | "payment.void"
   | "refund.record"
   | "expense.record"
   | "export.run"
   | "plan.create"
+  | "plan.update"
   | "plan.archive"
   | "subscription.update"
+  | "platform_payment.declare"
   | "platform_payment.validate"
   | "platform_payment.reject"
+  | "affiliate.update"
+  | "affiliate.settings.update"
+  | "affiliate.commission.pay"
   | "content.publish"
   | "content.update"
+  | "template.update"
+  | "template.delete"
+  | "platform_support.update"
   | "ticket.update";
 
 export type AuditEntry = {
@@ -54,26 +70,20 @@ export type AuditEntry = {
   before?: unknown;
   after?: unknown;
   ipAddress?: string | null;
+  mobileOperationId?: string | null;
 };
 
-export function recordAudit(entry: AuditEntry): void {
-  execute(
-    `INSERT INTO audit_log
-       (id, workshop_id, actor_user_id, action, entity_kind, entity_id,
-        reason, before_json, after_json, ip_address, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      newId(),
-      entry.workshopId ?? null,
-      entry.actorUserId ?? null,
-      entry.action,
-      entry.entityKind,
-      entry.entityId ?? null,
-      entry.reason ?? null,
-      entry.before === undefined ? null : JSON.stringify(entry.before),
-      entry.after === undefined ? null : JSON.stringify(entry.after),
-      entry.ipAddress ?? null,
-      nowIso(),
-    ],
-  );
+export async function recordAudit(
+  entry: AuditEntry,
+  executor?: PgExecutor,
+): Promise<void> {
+  await sql(`insert into public.audit_log
+    (id, workshop_id, actor_user_id, action, entity_kind, entity_id, reason, before_json, after_json, ip_address, mobile_operation_id)
+    values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::inet,$11::uuid)`, [
+    randomUUID(), entry.workshopId ?? null, entry.actorUserId ?? null, entry.action,
+    entry.entityKind, entry.entityId ?? null, entry.reason ?? null,
+    entry.before === undefined ? null : JSON.stringify(entry.before),
+    entry.after === undefined ? null : JSON.stringify(entry.after),
+    entry.ipAddress ?? null, entry.mobileOperationId ?? null,
+  ], executor);
 }

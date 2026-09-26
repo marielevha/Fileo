@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { site } from "@/lib/site";
+import { LOCALES } from "@/lib/i18n/config";
 
 /**
  * Public pages only (§6.2): the workshop space and the back-office are
@@ -19,10 +20,17 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ["/cgv", 0.3],
   ];
 
-  return pages.map(([path, priority]) => ({
-    url: `${site.url}${path}`,
-    lastModified: now,
-    changeFrequency: "monthly",
-    priority,
-  }));
+  return pages.flatMap(([path, priority]) =>
+    LOCALES.map((locale) => ({
+      url: `${site.url}/${locale}${path}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority,
+      alternates: {
+        languages: Object.fromEntries(
+          LOCALES.map((alternate) => [alternate === "lg" ? "ln" : alternate, `${site.url}/${alternate}${path}`]),
+        ),
+      },
+    })),
+  );
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getMessages } from "@/lib/i18n/messages";
+import type { Locale } from "@/lib/i18n/config";
 
 const STORAGE_KEY = "cc-cookie-consent";
 
@@ -11,29 +13,21 @@ type Consent = {
   marketing: boolean;
 };
 
-const categories = [
+const categorySettings = [
   {
     key: "essential",
-    title: "Cookies essentiels",
-    text: "Nécessaires au fonctionnement du site. Ils ne peuvent pas être désactivés.",
     locked: true,
   },
   {
     key: "analytics",
-    title: "Cookies analytiques",
-    text: "Mesure d'audience et analyse du comportement de navigation (2 ans maximum).",
     locked: false,
   },
   {
     key: "performance",
-    title: "Cookies de performance",
-    text: "Mémorisation de vos préférences et amélioration des performances (session à 1 an).",
     locked: false,
   },
   {
     key: "marketing",
-    title: "Cookies marketing",
-    text: "Publicité ciblée et mesure d'efficacité des campagnes (durée variable).",
     locked: false,
   },
 ] as const;
@@ -41,7 +35,8 @@ const categories = [
 const ALL_OFF: Consent = { essential: true, analytics: false, performance: false, marketing: false };
 const ALL_ON: Consent = { essential: true, analytics: true, performance: true, marketing: true };
 
-export default function CookieBanner() {
+export default function CookieBanner({ locale }: { locale: Locale }) {
+  const copy = getMessages(locale).cookies;
   const [visible, setVisible] = useState(false);
   const [details, setDetails] = useState(false);
   const [consent, setConsent] = useState<Consent>(ALL_OFF);
@@ -75,29 +70,27 @@ export default function CookieBanner() {
     >
       <div className="bg-base-100 border-base-300 mx-auto max-w-4xl rounded-2xl border p-5 shadow-2xl sm:p-6">
         <h2 id="cookie-title" className="text-lg font-bold">
-          Nous utilisons des cookies
+          {copy.title}
         </h2>
         <p className="text-base-content/70 mt-2 text-sm leading-relaxed">
-          Certains cookies sont indispensables au fonctionnement du site. Les autres nous aident à
-          mesurer l&apos;audience et à améliorer votre expérience. Vous restez libre de votre choix,
-          et pouvez le modifier à tout moment.
+          {copy.text}
         </p>
 
         {details ? (
           <ul className="mt-4 space-y-3">
-            {categories.map((category) => (
+            {categorySettings.map((category, index) => (
               <li
                 key={category.key}
                 className="border-base-300 flex items-start justify-between gap-4 rounded-xl border p-3"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold">{category.title}</p>
-                  <p className="text-base-content/60 mt-0.5 text-xs leading-relaxed">{category.text}</p>
+                  <p className="text-sm font-semibold">{copy.categories[index][0]}</p>
+                  <p className="text-base-content/60 mt-0.5 text-xs leading-relaxed">{copy.categories[index][1]}</p>
                 </div>
                 <input
                   type="checkbox"
                   className="toggle toggle-primary toggle-sm shrink-0"
-                  aria-label={category.title}
+                  aria-label={copy.categories[index][0]}
                   disabled={category.locked}
                   checked={consent[category.key]}
                   onChange={(event) =>
@@ -111,18 +104,18 @@ export default function CookieBanner() {
 
         <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={() => setDetails((v) => !v)} className="btn btn-ghost btn-sm">
-            {details ? "Masquer le détail" : "Personnaliser"}
+            {details ? copy.hide : copy.customize}
           </button>
           <button type="button" onClick={() => save(ALL_OFF)} className="btn btn-outline btn-sm">
-            Tout refuser
+            {copy.reject}
           </button>
           {details ? (
             <button type="button" onClick={() => save(consent)} className="btn btn-outline btn-sm">
-              Enregistrer mes préférences
+              {copy.save}
             </button>
           ) : null}
           <button type="button" onClick={() => save(ALL_ON)} className="btn btn-primary btn-sm">
-            Accepter tout
+            {copy.accept}
           </button>
         </div>
       </div>

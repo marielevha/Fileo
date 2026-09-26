@@ -9,7 +9,7 @@ import { COUNTRIES, type CountryCode } from "@/lib/phone";
 
 const initial: FormState = {};
 
-export default function SignUpForm() {
+export default function SignUpForm({ planCode }: { planCode?: string }) {
   // The country drives the suggested currency, but the operator keeps the
   // final say: §2.3 leaves the working currency per workshop.
   const [currency, setCurrency] = useState<string>(COUNTRIES.CG.defaultCurrency);
@@ -17,6 +17,7 @@ export default function SignUpForm() {
 
   return (
     <form action={action} className="mt-7 space-y-4">
+      {planCode ? <input type="hidden" name="planCode" value={planCode} /> : null}
       <div>
         <label className="label-text mb-1.5 block font-medium" htmlFor="fullName">
           Votre nom <span className="text-error">*</span>
@@ -96,6 +97,23 @@ export default function SignUpForm() {
             ))}
           </select>
         </div>
+      </div>
+
+      <div>
+        <label className="label-text mb-1.5 block font-medium" htmlFor="affiliateCode">
+          Code d'affiliation
+        </label>
+        <input
+          id="affiliateCode"
+          name="affiliateCode"
+          type="text"
+          autoCapitalize="characters"
+          placeholder="Ex. FILEO-BZV"
+          className="input input-bordered w-full uppercase"
+        />
+        <p className="text-base-content/50 mt-1.5 text-xs">
+          Facultatif. Renseignez-le si quelqu'un vous a recommandé Filéo.
+        </p>
       </div>
 
       {/* §7.2: changing the currency after the first transaction is not a

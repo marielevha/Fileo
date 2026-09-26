@@ -2,8 +2,15 @@ import Link from "next/link";
 import Logo from "./Logo";
 import Icon from "@/components/ui/Icon";
 import { footerProduct, footerSupport, legalLinks, site } from "@/lib/site";
+import { getLocale } from "@/lib/i18n/request";
+import { getMessages } from "@/lib/i18n/messages";
+import { localePath } from "@/lib/i18n/config";
 
-export default function Footer() {
+export default async function Footer() {
+  const locale = await getLocale();
+  const copy = getMessages(locale);
+  const productLabels = [copy.nav.features, copy.nav.pricing, copy.footer.download, copy.footer.news];
+  const supportLabels = [copy.footer.gettingStarted, copy.footer.faq, copy.footer.contactLink];
   // base-300 rather than `neutral`: in synthwave, neutral is a vivid indigo.
   return (
     <footer className="bg-base-300 text-base-content">
@@ -12,27 +19,26 @@ export default function Footer() {
           <div>
             <Logo />
             <p className="text-base-content/65 mt-5 max-w-sm text-sm leading-relaxed">
-              {site.tagline} Filéo centralise clients, mesures, commandes et encaissements pour les
-              ateliers de couture.
+              {copy.footer.description}
             </p>
 
             <p className="text-base-content/50 mt-5 text-xs">
-              Marchés desservis : République du Congo et République démocratique du Congo.
+              {copy.footer.markets}
             </p>
           </div>
 
           <nav aria-labelledby="footer-product">
             <h2 id="footer-product" className="text-primary font-display text-base font-bold">
-              Produit
+              {copy.footer.product}
             </h2>
             <ul className="mt-5 space-y-3 text-sm">
-              {footerProduct.map((link) => (
+              {footerProduct.map((link, index) => (
                 <li key={link.href}>
                   <Link
-                    href={link.href}
+                    href={localePath(locale, link.href)}
                     className="text-base-content/65 hover:text-primary transition-colors"
                   >
-                    {link.label}
+                    {productLabels[index]}
                   </Link>
                 </li>
               ))}
@@ -41,16 +47,16 @@ export default function Footer() {
 
           <nav aria-labelledby="footer-support">
             <h2 id="footer-support" className="text-primary font-display text-base font-bold">
-              Assistance
+              {copy.footer.support}
             </h2>
             <ul className="mt-5 space-y-3 text-sm">
-              {footerSupport.map((link) => (
+              {footerSupport.map((link, index) => (
                 <li key={link.href}>
                   <Link
-                    href={link.href}
+                    href={localePath(locale, link.href)}
                     className="text-base-content/65 hover:text-primary transition-colors"
                   >
-                    {link.label}
+                    {supportLabels[index]}
                   </Link>
                 </li>
               ))}
@@ -58,7 +64,7 @@ export default function Footer() {
           </nav>
 
           <div>
-            <h2 className="text-primary font-display text-base font-bold">Contact</h2>
+            <h2 className="text-primary font-display text-base font-bold">{copy.footer.contact}</h2>
             <ul className="mt-5 space-y-3.5 text-sm">
               <li>
                 <a
@@ -71,11 +77,11 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/connexion"
+                  href={localePath(locale, "/connexion")}
                   className="text-base-content/65 hover:text-primary inline-flex items-center gap-2.5 transition-colors"
                 >
                   <Icon name="users" className="h-4 w-4 shrink-0" />
-                  Espace atelier
+                  {copy.footer.workshop}
                 </Link>
               </li>
             </ul>
@@ -84,16 +90,16 @@ export default function Footer() {
 
         <div className="border-base-content/12 mt-14 flex flex-col items-center justify-between gap-4 border-t pt-8 text-sm sm:flex-row">
           <p className="text-base-content/55">
-            © {site.foundedYear} {site.name}. Tous droits réservés.
+            © {site.foundedYear} {site.name}. {copy.footer.rights}
           </p>
           <ul className="flex flex-wrap items-center justify-center gap-x-7 gap-y-2">
-            {legalLinks.map((link) => (
+            {legalLinks.map((link, index) => (
               <li key={link.href}>
                 <Link
-                  href={link.href}
+                  href={localePath(locale, link.href)}
                   className="text-base-content/55 hover:text-primary transition-colors"
                 >
-                  {link.label}
+                  {copy.footer.legal[index]}
                 </Link>
               </li>
             ))}

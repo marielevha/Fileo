@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Filéo",
+    "slug": "fileo-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "fileo",
+    "backgroundColor": "#1F1235",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1F1235",
+          "image": "./assets/images/fileo-splash-vertical-hd.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#1F1235",
+            "image": "./assets/images/fileo-splash-vertical-hd.png"
+          }
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Filéo utilise vos photos pour illustrer les commandes et les mensurations.",
+          "cameraPermission": "Filéo utilise l'appareil photo pour ajouter des photos aux commandes et aux mensurations.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store",
+      "@react-native-community/datetimepicker",
+      "expo-sqlite"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
