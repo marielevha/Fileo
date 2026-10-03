@@ -1,0 +1,9 @@
+:80 {
+	reverse_proxy fileo-web:3000
+}
+
+# Quand le domaine sera disponible, remplacer le bloc ci-dessus par :
+#
+# app.fileo.example {
+# 	reverse_proxy fileo-web:3000
+# }
