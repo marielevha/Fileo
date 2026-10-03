@@ -36,7 +36,7 @@ export default function SupportContactForm({ email, appVersion, companyName, row
       </label>
 
       <label className="form-control block">
-        <span className="label-text mb-1.5 block text-sm font-medium">Version de l'application</span>
+        <span className="label-text mb-1.5 block text-sm font-medium">Version de l&apos;application</span>
         <input
           type="text"
           name="appVersion"

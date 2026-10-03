@@ -95,7 +95,7 @@ function PlanModal({ onClose, plan }: { onClose: () => void; plan: PlanRow }) {
       <div className="modal-box max-w-4xl rounded-lg">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="font-display text-xl font-bold">Modifier l'offre</h3>
+            <h3 className="font-display text-xl font-bold">Modifier l&apos;offre</h3>
             <p className="mt-1 text-sm text-base-content/55">{plan.code} · {plan.country_code} · {plan.currency}</p>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Fermer</button>

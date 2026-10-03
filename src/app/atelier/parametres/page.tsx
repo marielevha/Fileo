@@ -23,7 +23,7 @@ export default async function WorkshopSettingsPage() {
     <>
       <PageHeader
         title="Parametres atelier"
-        description="Configurez les types d'articles et les mensurations proposees pendant la saisie."
+        description="Configurez les types d&apos;articles et les mensurations proposees pendant la saisie."
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -49,7 +49,7 @@ export default async function WorkshopSettingsPage() {
           <section className="rounded-2xl border border-base-300 bg-base-100 p-5">
             <h2 className="font-display font-bold">Unites de mensuration</h2>
             <p className="mt-1 text-sm text-base-content/55">
-              Ces unites sont proposees dans les modeles, les commandes et l'application mobile.
+              Ces unites sont proposees dans les modeles, les commandes et l&apos;application mobile.
             </p>
             <form action={saveMeasurementUnitsAction} className="mt-4 grid gap-4">
               <MeasurementUnitsInput initialUnits={measurementUnits} />

@@ -101,7 +101,7 @@ export default function SignUpForm({ planCode }: { planCode?: string }) {
 
       <div>
         <label className="label-text mb-1.5 block font-medium" htmlFor="affiliateCode">
-          Code d'affiliation
+          Code d&apos;affiliation
         </label>
         <input
           id="affiliateCode"
@@ -112,7 +112,7 @@ export default function SignUpForm({ planCode }: { planCode?: string }) {
           className="input input-bordered w-full uppercase"
         />
         <p className="text-base-content/50 mt-1.5 text-xs">
-          Facultatif. Renseignez-le si quelqu'un vous a recommandé Filéo.
+          Facultatif. Renseignez-le si quelqu&apos;un vous a recommandé Filéo.
         </p>
       </div>
 
