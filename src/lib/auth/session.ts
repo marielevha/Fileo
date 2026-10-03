@@ -16,8 +16,25 @@ export type SessionContext = {
   workshop: { id: string; name: string; currency: string; countryCode: string; timezone: string; status: string; role: WorkshopRole; canViewMoney: boolean; measurementUnits: string[] } | null;
 };
 
+function shouldUseSecureCookies() {
+  const explicit = process.env.WEB_COOKIE_SECURE?.trim().toLowerCase();
+  if (explicit === "true" || explicit === "1") return true;
+  if (explicit === "false" || explicit === "0") return false;
+
+  const publicUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (publicUrl) {
+    try {
+      return new URL(publicUrl).protocol === "https:";
+    } catch {
+      return process.env.NODE_ENV === "production";
+    }
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 const cookieOptions = (expires?: Date) => ({
-  httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", expires,
+  httpOnly: true, sameSite: "lax" as const, secure: shouldUseSecureCookies(), path: "/", expires,
 });
 
 export async function createSession(accessToken: string, refreshToken: string, expiresAt?: number): Promise<void> {
