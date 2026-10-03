@@ -61,6 +61,7 @@ Renseigner au minimum :
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SITE_URL=http://IP_DU_VPS`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_POOLER_DB_URL` ou `SUPABASE_DB_URL`
 - `SUPABASE_STORAGE_PRIVATE_BUCKET`
@@ -75,11 +76,15 @@ Il faut donc reconstruire l'image apres les avoir modifiees.
 docker compose --env-file .env.production up -d --build
 ```
 
+Le premier build peut prendre plusieurs minutes : Next.js telecharge aussi les
+polices configurees avec `next/font`.
+
 Verifier :
 
 ```bash
 docker compose ps
 docker compose logs -f fileo-web
+curl http://IP_DU_VPS/api/mobile/v1/health
 ```
 
 Acceder ensuite a :
@@ -118,6 +123,19 @@ Mettre ensuite `NEXT_PUBLIC_APP_URL=https://app.fileo.example` dans
 
 ```bash
 docker compose --env-file .env.production up -d --build
+```
+
+Une fois la branche de deploiement stabilisee, un script peut faire la mise a
+jour courante :
+
+```bash
+APP_DIR=/opt/fileo BRANCH=main sh scripts/deploy-vps.sh
+```
+
+Pendant les tests Docker depuis une branche dediee :
+
+```bash
+APP_DIR=/opt/fileo BRANCH=feature/docker-vps-deploy sh scripts/deploy-vps.sh
 ```
 
 ## 6. Commandes utiles
